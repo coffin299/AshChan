@@ -1,14 +1,14 @@
 # セットアップ
 
-## 1. Python 3.12
+## 1. Python 3.11
 
-`start.bat` は Python 3.12 専用です（`py -3.12` で起動します）。
+`start.bat` は Python 3.11 専用です（`py -3.11` で起動します）。
 
 ```powershell
-winget install Python.Python.3.12
+winget install Python.Python.3.11
 ```
 
-既存の `.venv` が 3.12 以外で作られていた場合、`start.bat` が自動で作り直します。
+既存の `.venv` が 3.11 以外で作られていた場合、`start.bat` が自動で作り直します。
 
 ## 2. Discord ボットの作成
 

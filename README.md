@@ -22,7 +22,7 @@ VRChat の ASH ちゃん風キャラクター「アッシュ」が住む Discord
 
 ## クイックスタート（Windows）
 
-1. Python 3.12 をインストール（`winget install Python.Python.3.12`）
+1. Python 3.11 をインストール（`winget install Python.Python.3.11`）
 2. `start.bat` を実行 → `.venv` 作成・パッケージ導入・`config.yaml` 生成
 3. `config.yaml` の `discord.token` と `llm.api_key` などを編集
 4. もう一度 `start.bat` を実行して起動

@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM AshChan Bot launcher (Windows)
-REM - Requires Python 3.12 (via the "py" launcher)
+REM - Requires Python 3.11 (via the "py" launcher)
 REM - Creates .venv and installs requirements on first run
 REM - Generates config.yaml from config.default.yaml on first run
 REM ============================================================
@@ -14,29 +14,29 @@ set "HASH_FILE=%VENV_DIR%\.req_hash"
 
 echo [AshChan] Starting launcher...
 
-REM --- Check that Python 3.12 is available ---
-py -3.12 --version >nul 2>&1
+REM --- Check that Python 3.11 is available ---
+py -3.11 --version >nul 2>&1
 if errorlevel 1 (
-    echo [AshChan] ERROR: Python 3.12 is required but was not found.
+    echo [AshChan] ERROR: Python 3.11 is required but was not found.
     echo [AshChan] Install it from https://www.python.org/downloads/
-    echo [AshChan]   or run: winget install Python.Python.3.12
+    echo [AshChan]   or run: winget install Python.Python.3.11
     pause
     exit /b 1
 )
 
 REM --- Recreate .venv if it was built with another Python version ---
 if exist "%VENV_PY%" (
-    "%VENV_PY%" -B -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>&1
+    "%VENV_PY%" -B -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 11) else 1)" >nul 2>&1
     if errorlevel 1 (
-        echo [AshChan] Existing .venv is not Python 3.12. Recreating it...
+        echo [AshChan] Existing .venv is not Python 3.11. Recreating it...
         rmdir /s /q "%VENV_DIR%"
     )
 )
 
 REM --- Create .venv if missing ---
 if not exist "%VENV_PY%" (
-    echo [AshChan] Creating virtual environment with Python 3.12...
-    py -3.12 -m venv "%VENV_DIR%"
+    echo [AshChan] Creating virtual environment with Python 3.11...
+    py -3.11 -m venv "%VENV_DIR%"
     if errorlevel 1 (
         echo [AshChan] ERROR: Failed to create the virtual environment.
         pause
