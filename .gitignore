@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local settings / secrets
+config.yaml
+
+# Runtime data (SQLite, logs)
+data/
+logs/

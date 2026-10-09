@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AshChan - Discord Bot</title>
+  <style>
+    :root {
+      --bg: #1e1f22;
+      --panel: #2b2d31;
+      --text: #dbdee1;
+      --muted: #949ba4;
+      --accent: #c9a27e;
+      --border: #3f4147;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+    header {
+      padding: 48px 24px 32px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 { margin: 0; font-size: 2.4rem; color: var(--accent); }
+    header p { margin: 8px 0 0; color: var(--muted); }
+    main { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+    h2 { border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 48px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .card h3 { margin: 0 0 8px; color: var(--accent); font-size: 1.1rem; }
+    .card p { margin: 0; color: var(--text); font-size: 0.95rem; }
+    code {
+      background: #111214;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    pre {
+      background: #111214;
+      padding: 14px 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+    th { background: var(--panel); }
+    a { color: var(--accent); }
+    footer { text-align: center; color: var(--muted); padding: 24px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AshChan</h1>
+    <p>気まぐれで頼れる猫っぽい相棒「アッシュ」が住む Discord ボット</p>
+  </header>
+
+  <main>
+    <h2>機能</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>会話（NVIDIA NIM）</h3>
+        <p>メンション・リプライにストリーミング応答。2秒ごとにメッセージが育っていきます。NIM エラー時は「あとでね！」系の定型文。</p>
+      </div>
+      <div class="card">
+        <h3>Web検索（DuckDuckGo）</h3>
+        <p>必要に応じてアッシュが自分で検索。検索中は <code>検索中...🔍 クエリ</code> を表示し、参照 URL を末尾に付記。</p>
+      </div>
+      <div class="card">
+        <h3>モデレーション</h3>
+        <p>メンション過多・招待リンク・疑わしいリンク・NGワードを削除+タイムアウト。Discord AutoMod ルールも自動作成。</p>
+      </div>
+      <div class="card">
+        <h3>アンチnuke</h3>
+        <p>監査ログを実行者単位で集計し、大量削除・大量BAN・危険権限付与を dev 通知+緊急DM。</p>
+      </div>
+      <div class="card">
+        <h3>ハニーポット</h3>
+        <p>罠チャンネルに投稿すると 1〜3回目は全投稿削除+キック、4回目で BAN。指定ロールで回避可能。</p>
+      </div>
+      <div class="card">
+        <h3>FixLink</h3>
+        <p>Twitter/X のリンクを <code>fxtwitter.com</code> に置き換えて返信し、元の埋め込みを非表示に。</p>
+      </div>
+      <div class="card">
+        <h3>自動ロール</h3>
+        <p>新規参加者に指定ロールを自動付与。メンバーシップ審査を使っていれば、ルール同意後に付与します。</p>
+      </div>
+      <div class="card">
+        <h3>GitHub 通知</h3>
+        <p>GitHub Webhook を受信し、Issue / PR のコメント・クローズ等とリリースを通知。Issue 番号ごと・リリース用に送信先を分けられます。</p>
+      </div>
+    </div>
+
+    <h2>ハニーポットの段階制裁</h2>
+    <table>
+      <tr><th>回数</th><th>処置</th><th>理由</th></tr>
+      <tr><td>1〜3回目</td><td>投稿を全削除 → キック</td><td><code>ハニーポット検知(n回目)</code></td></tr>
+      <tr><td>4回目</td><td>BAN（直近7日のメッセージ削除）</td><td><code>ハニーポット検知(4回目)</code></td></tr>
+    </table>
+
+    <h2>管理コマンド</h2>
+    <table>
+      <tr><th>コマンド</th><th>内容</th></tr>
+      <tr><td><code>/ash status</code></td><td>稼働状況・LLM 疎通・各機能の ON/OFF</td></tr>
+      <tr><td><code>/ash reload</code></td><td>config.yaml と prompt.md を再読込し AutoMod を再同期</td></tr>
+      <tr><td><code>/ash honeypot count</code></td><td>ハニーポット検知回数を表示</td></tr>
+      <tr><td><code>/ash honeypot reset</code></td><td>ハニーポット検知回数をリセット</td></tr>
+    </table>
+
+    <h2>クイックスタート（Windows）</h2>
+    <pre>winget install Python.Python.3.12
+start.bat            # 初回: .venv と config.yaml を生成
+# config.yaml を編集（discord.token / llm.api_key など）
+start.bat            # 起動</pre>
+    <p>詳しくは <a href="setup.md">setup.md</a> と <a href="features.md">features.md</a> を参照してください。</p>
+  </main>
+
+  <footer>AshChan Discord Bot</footer>
+</body>
+</html>
