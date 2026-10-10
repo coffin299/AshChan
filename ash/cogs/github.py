@@ -169,17 +169,36 @@ class GitHubCog(commands.Cog):
             return web.Response(text="pong")
         # 同じ配信の再送は無視する
         if delivery and delivery in self._seen:
+            log.info("GitHub: 重複配信のため無視しました (delivery=%s)", delivery)
             return web.Response(status=200, text="duplicate")
         self._seen.append(delivery)
         try:
             payload = json.loads(body)
         except json.JSONDecodeError:
             return web.Response(status=400, text="invalid json")
+        # 受信内容をログに残す（届いているかの切り分け用）
+        log.info(
+            "GitHub: 受信 event=%s action=%s repo=%s delivery=%s",
+            event,
+            payload.get("action"),
+            (payload.get("repository") or {}).get("full_name"),
+            delivery,
+        )
         # GitHub のタイムアウト（10秒）を避けるため、送信は後回しにして即応答する
         task = asyncio.create_task(self._dispatch(event, payload))
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._on_task_done)
         return web.Response(status=202, text="accepted")
+
+    def _on_task_done(self, task: asyncio.Task[None]) -> None:
+        """通知タスクの後始末と、想定外の例外の記録。"""
+        self._tasks.discard(task)
+        # キャンセルされたタスクは例外を取り出せない
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            log.error("GitHub: 通知処理で例外が発生しました", exc_info=exc)
 
     async def _dispatch(self, event: str, payload: dict[str, Any]) -> None:
         """イベントを埋め込みに変換して送信する。"""
@@ -187,15 +206,21 @@ class GitHubCog(commands.Cog):
         events = cfg.events or DEFAULT_EVENTS
         # 通知対象外のイベントは無視する
         if not events.get(event, False):
+            log.info("GitHub: events で無効のため無視しました (%s)", event)
             return
         # ボット（dependabot 等）の投稿を除外する
         # リリースは GitHub Actions 等のボットが公開することが多いので対象外
         sender = payload.get("sender") or {}
         is_bot = sender.get("type") == "Bot"
         if cfg.ignore_bots and is_bot and event != "release":
+            log.info("GitHub: ボットの操作のため無視しました (%s)",
+                     sender.get("login"))
             return
         notification = self._build(event, payload)
+        # 通知対象外のアクション（編集・削除など）は捨てる
         if notification is None:
+            log.info("GitHub: 対象外のアクションのため無視しました (%s/%s)",
+                     event, payload.get("action"))
             return
         await self._send(notification)
 
@@ -341,18 +366,26 @@ class GitHubCog(commands.Cog):
         channel_id = self._resolve_channel(notification)
         # 送信先が決まらなければ捨てる
         if not channel_id:
-            log.info("送信先チャンネル未設定のため通知を捨てました (%s)", repo)
+            log.warning("GitHub: 送信先チャンネル未設定のため通知を捨てました "
+                        "(%s #%s)", repo, notification.number)
             return
         try:
             channel = self.bot.get_channel(channel_id)
             if channel is None:
                 channel = await self.bot.fetch_channel(channel_id)
-            if isinstance(channel, discord.abc.Messageable):
-                await channel.send(
-                    embed=embed, allowed_mentions=discord.AllowedMentions.none()
-                )
+            # フォーラム・カテゴリ等は直接送信できない
+            if not isinstance(channel, discord.abc.Messageable):
+                log.warning("GitHub: チャンネル %s は送信できない種類です (%s)",
+                            channel_id, type(channel).__name__)
+                return
+            await channel.send(
+                embed=embed, allowed_mentions=discord.AllowedMentions.none()
+            )
+            log.info("GitHub: 通知を送信しました (%s #%s → %s)",
+                     repo, notification.number, channel_id)
         except discord.HTTPException as exc:
-            log.warning("GitHub 通知の送信に失敗しました (%s): %s", repo, exc)
+            log.warning("GitHub: 通知の送信に失敗しました (%s → %s): %s",
+                        repo, channel_id, exc)
 
 
 async def setup(bot: AshBot) -> None:
