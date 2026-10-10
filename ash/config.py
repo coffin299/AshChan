@@ -129,6 +129,19 @@ class AutoRoleConfig:
 
 
 @dataclass
+class WelcomeConfig:
+    """新規参加者へのようこそメッセージ設定。"""
+
+    enabled: bool = False
+    channel_id: int = 0
+    wait_for_screening: bool = True
+    max_lines: int = 3
+    extra_instructions: str = ""
+    max_llm_per_minute: int = 5
+    fallback_messages: list[str] = field(default_factory=list)
+
+
+@dataclass
 class IssueRoute:
     """特定の Issue / PR 番号の通知先。"""
 
@@ -188,6 +201,7 @@ class Config:
     honeypot: HoneypotConfig
     fixlink: FixLinkConfig
     autorole: AutoRoleConfig
+    welcome: WelcomeConfig
     github: GitHubConfig
     path: Path
 
@@ -246,6 +260,7 @@ def load_config(path: Path | None = None) -> Config:
     fixlink_raw = raw.get("fixlink") or {}
     fixlink_cfg = _build(FixLinkConfig, fixlink_raw)
     autorole_cfg = _build(AutoRoleConfig, raw.get("autorole"))
+    welcome_cfg = _build(WelcomeConfig, raw.get("welcome"))
     github_raw = raw.get("github") or {}
     github_cfg = _build(GitHubConfig, github_raw)
 
@@ -273,6 +288,7 @@ def load_config(path: Path | None = None) -> Config:
     fixlink_cfg.ignore_channel_ids = _int_list(fixlink_cfg.ignore_channel_ids)
     autorole_cfg.role_ids = _int_list(autorole_cfg.role_ids)
     autorole_cfg.bot_role_ids = _int_list(autorole_cfg.bot_role_ids)
+    welcome_cfg.channel_id = int(welcome_cfg.channel_id or 0)
     github_cfg.default_channel_id = int(github_cfg.default_channel_id or 0)
     github_cfg.issue_channel_id = int(github_cfg.issue_channel_id or 0)
     github_cfg.release_channel_id = int(github_cfg.release_channel_id or 0)
@@ -318,6 +334,7 @@ def load_config(path: Path | None = None) -> Config:
         honeypot=honeypot_cfg,
         fixlink=fixlink_cfg,
         autorole=autorole_cfg,
+        welcome=welcome_cfg,
         github=github_cfg,
         path=config_path,
     )

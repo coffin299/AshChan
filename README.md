@@ -14,6 +14,7 @@ VRChat の ASH ちゃん風キャラクター「アッシュ」が住む Discord
 | アンチnuke | 監査ログを実行者単位で集計し、大量削除・大量BAN・危険権限付与などを dev 通知+緊急DM |
 | ハニーポット | 罠チャンネルに投稿したら 1〜3回目: 全投稿削除+キック、4回目: BAN（理由「ハニーポット検知(n回目)」） |
 | FixLink | Twitter/X のリンクを `fxtwitter.com` に置き換えて返信し、元の埋め込みを非表示 |
+| ようこそメッセージ | 新規参加者へアッシュの口調で 1〜3 行の挨拶を LLM で生成し、着地チャンネルへ送信 |
 | 自動ロール | 新規参加者に指定ロールを自動付与（メンバーシップ審査の通過待ちにも対応） |
 | GitHub 通知 | GitHub Webhook を受信し、Issue / PR のコメント・状態変化とリリースを通知。Issue 番号ごと・リリース用に送信先チャンネルを指定可能（署名検証あり） |
 | 管理コマンド | `/ash status` `/ash reload` `/ash honeypot count` `/ash honeypot reset` |
@@ -46,7 +47,7 @@ AshChan/
 │   ├── notifier.py        # dev 通知 / 緊急DM
 │   ├── utils.py
 │   ├── llm/               # NIM クライアント・DDG 検索・ストリーミング表示
-│   └── cogs/              # chat / moderation / antinuke / honeypot / fixlink / autorole / github / admin
+│   └── cogs/              # chat / moderation / antinuke / honeypot / fixlink / autorole / welcome / github / admin
 ├── data/                  # 実行時データ（Git 管理外）
 ├── logs/                  # ログ（Git 管理外）
 └── docs/                  # ドキュメント

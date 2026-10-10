@@ -26,6 +26,7 @@ COG_EXTENSIONS = (
     "ash.cogs.antinuke",
     "ash.cogs.fixlink",
     "ash.cogs.autorole",
+    "ash.cogs.welcome",
     "ash.cogs.github",
     "ash.cogs.chat",
     "ash.cogs.admin",

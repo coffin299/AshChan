@@ -126,6 +126,15 @@ class LLMClient:
             if calls:
                 yield StreamEvent(kind="tool_calls", tool_calls=calls)
 
+    async def complete(self, messages: list[dict[str, Any]]) -> str:
+        """ツールなしで生成し、全文をまとめて返す（短文生成用）。"""
+        parts: list[str] = []
+        # ストリーミングの本文差分を連結する
+        async for event in self.stream_chat(messages):
+            if event.kind == "text":
+                parts.append(event.text)
+        return "".join(parts).strip()
+
     async def ping(self) -> bool:
         """API の疎通確認（モデル一覧取得が成功するか）。"""
         # キー未設定なら疎通不可

@@ -83,6 +83,7 @@ class AdminCog(commands.Cog):
                     f"{_on_off(cfg.autorole.enabled)}"
                     f"（{len(cfg.autorole.role_ids)} ロール）"
                 ),
+                "ようこそメッセージ": _on_off(cfg.welcome.enabled),
                 "GitHub通知": self._github_status(),
             },
         )

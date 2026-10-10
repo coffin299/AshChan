@@ -16,7 +16,7 @@ winget install Python.Python.3.11
 2. **Bot** タブでトークンを発行（`Reset Token`）→ `config.yaml` の `discord.token` へ
 3. **Privileged Gateway Intents** で次を ON
    - `MESSAGE CONTENT INTENT`（会話・モデレーション・FixLink）
-   - `SERVER MEMBERS INTENT`（ハニーポット・ロール判定・自動ロール）
+   - `SERVER MEMBERS INTENT`（ハニーポット・ロール判定・自動ロール・ようこそメッセージ）
 4. **OAuth2 → URL Generator** でスコープ `bot` と `applications.commands` を選び、次の権限で招待
 
 | 権限 | 用途 |
@@ -81,6 +81,7 @@ start.bat
 | `honeypot.channel_ids` | 罠チャンネル |
 | `honeypot.exempt_role_ids` | ハニーポットを回避できるロール |
 | `autorole.enabled` / `autorole.role_ids` | 新規参加者に付与するロール |
+| `welcome.enabled` / `welcome.channel_id` | ようこそメッセージと着地チャンネル |
 
 各項目の詳しい説明は `config.yaml` 内のコメントを参照してください。
 設定を変えたら `/ash reload` で再起動なしに反映できます（トークン以外）。

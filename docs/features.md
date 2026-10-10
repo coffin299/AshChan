@@ -82,6 +82,18 @@ dev 通知チャンネルと緊急 DM 先に通知します（自動処罰はし
 - `<https://...>` で埋め込みを止めたリンク、スポイラー `||...||`、コード内のリンクは対象外
 - `fixlink.rules` に追加すれば Instagram / TikTok / Pixiv なども対応可能（config にコメントアウト例あり）
 
+## ようこそメッセージ
+
+- 新規参加者へ、アッシュの口調で `welcome.max_lines`（既定3）行以内の挨拶を LLM で生成して送信
+- 送信先は `welcome.channel_id`（0 ならサーバーのシステムメッセージチャンネル）
+- 通常のメッセージとして送るので、着地チャンネルを見られる全員に表示される
+- 先頭で本人をメンション（メンション通知が飛ぶのは本人のみ。@everyone 等は飛ばない）
+- `welcome.wait_for_screening` が ON なら、メンバーシップ審査を通過した時点で挨拶
+- `welcome.extra_instructions` でサーバー案内（例: 質問は #help）を混ぜられる
+- NIM エラー時、または1分あたり `max_llm_per_minute` 回を超えた大量参加時は `fallback_messages` の定型文
+- ボットの参加には挨拶しない
+- 既定は OFF（`welcome.enabled: true` で有効化）
+
 ## 自動ロール
 
 - 新規参加者に `autorole.role_ids` のロールを付与（ボットには `autorole.bot_role_ids`）
