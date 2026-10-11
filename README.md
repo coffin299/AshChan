@@ -16,7 +16,7 @@ VRChat の ASH ちゃん風キャラクター「アッシュ」が住む Discord
 | FixLink | Twitter/X のリンクを `fxtwitter.com` に置き換えて返信し、元の埋め込みを非表示 |
 | ようこそメッセージ | 新規参加者へアッシュの口調で 1〜3 行の挨拶を LLM で生成し、着地チャンネルへ送信 |
 | 自動ロール | 新規参加者に指定ロールを自動付与（メンバーシップ審査の通過待ちにも対応） |
-| GitHub 通知 | GitHub Webhook を受信し、Issue / PR のコメント・状態変化とリリースを通知。Issue 番号ごと・リリース用に送信先チャンネルを指定可能（署名検証あり） |
+| GitHub 通知 | GitHub Webhook を受信し、Issue / PR のコメント・状態変化、リリース、コミットを通知。Issue 番号ごと・リリース用・コミット用に送信先チャンネルを指定可能（署名検証あり） |
 | 管理コマンド | `/ash status` `/ash reload` `/ash honeypot count` `/ash honeypot reset` |
 
 詳細は [docs/features.md](docs/features.md) を参照してください。

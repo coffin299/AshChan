@@ -473,7 +473,7 @@ welcome:
 # ============================================================
 # GitHub 通知（Webhook 受信）
 # ------------------------------------------------------------
-# GitHub の Issue / PR のコメント・状態変化と、リリースを Discord チャンネルへ通知します。
+# GitHub の Issue / PR のコメント・状態変化、リリース、コミットを Discord チャンネルへ通知します。
 # Issue は番号ごとに送信先チャンネルを分けられます。
 # ボット内で小さな HTTP サーバーを起動し、GitHub からの Webhook を受け取ります。
 #
@@ -482,7 +482,7 @@ welcome:
 #   Content type : application/json
 #   Secret       : 下の secret と同じ文字列
 #   Events       : 「Let me select individual events」→ Issue comments / Issues / Releases
-#                  （必要に応じて Pull requests / Pull request review comments も）
+#                  （必要に応じて Pull requests / Pull request review comments / Pushes も）
 #
 # ■ 外部公開について
 #   GitHub から届く必要があるので、次のどちらかが必要です。
@@ -524,6 +524,8 @@ github:
   #       issue_routes に番号が一致 → issue_channel_id → default_channel_id
   #   リリース
   #       release_channel_id → default_channel_id
+  #   コミット（push）
+  #       commit_channel_id → default_channel_id
   # どれも 0 / 未設定なら、その通知は送られません。
 
   # 上記で決まらなかった通知の送り先（最後の受け皿）。
@@ -553,6 +555,17 @@ github:
   # 型: 整数 / 既定: 0
   release_channel_id: 0
 
+  # コミット（ブランチへの push）通知の送り先。
+  # ※ events.push を true にし、GitHub 側で「Pushes」も選択してください。
+  # 型: 整数 / 既定: 0
+  commit_channel_id: 0
+
+  # コミット通知の対象ブランチ名の一覧。空 [] なら全ブランチを通知します。
+  # タグの push・ブランチ削除は通知しません。
+  # 型: 文字列のリスト / 既定: []
+  # 例: ["main", "develop"]
+  commit_branches: []
+
   # ----------------------------------------------------------
   # 通知するイベント
   # GitHub 側の Webhook でも同じイベントを選択しておく必要があります。
@@ -569,6 +582,8 @@ github:
     pull_request_review_comment: false
     # リリースの公開（プレリリース含む・下書きは除く）      … Releases
     release: true
+    # ブランチへのコミット push                             … Pushes
+    push: false
 
   # ボットアカウント（dependabot 等）のコメント・操作を通知しないか。
   # ※ リリースは GitHub Actions が公開することが多いため、この設定に関係なく通知します。
@@ -582,6 +597,10 @@ github:
   # 通知に載せるリリースノートの最大文字数。
   # 型: 整数 / 既定: 2000（埋め込みの上限は約4000）
   max_release_body_chars: 2000
+
+  # 1回の push 通知に載せるコミットの最大件数。超えた分は「…ほか n 件」と表示します。
+  # 型: 整数 / 既定: 10
+  max_commits: 10
 
 
 # ============================================================

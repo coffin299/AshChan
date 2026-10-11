@@ -1,8 +1,9 @@
-"""GitHub Webhook 受信: Issue / PR / リリースを Discord チャンネルへ通知する。
+"""GitHub Webhook 受信: Issue / PR / リリース / コミットを Discord へ通知する。
 
 送信先の振り分け:
     Issue / PR 関連 : issue_routes（番号別）→ issue_channel_id → default_channel_id
     リリース        : release_channel_id → default_channel_id
+    コミット（push）: commit_channel_id → default_channel_id
 """
 
 from __future__ import annotations
@@ -39,6 +40,12 @@ COLOR_OPENED = discord.Color.green()
 COLOR_CLOSED = discord.Color.dark_grey()
 COLOR_MERGED = discord.Color.purple()
 COLOR_RELEASE = discord.Color.gold()
+COLOR_PUSH = discord.Color.teal()
+# ブランチ push の ref 接頭辞（タグ push と区別する）
+BRANCH_REF_PREFIX = "refs/heads/"
+# コミット一覧で表示するハッシュの桁数と、1行あたりのメッセージ上限
+SHORT_SHA_LEN = 7
+COMMIT_LINE_CHARS = 100
 # issues イベントで通知するアクションと表示名
 ISSUE_ACTIONS = {
     "opened": ("Issue 作成", COLOR_OPENED),
@@ -54,6 +61,7 @@ PR_ACTIONS = {
 # 通知の分類（送信先チャンネルの振り分けに使う）
 CATEGORY_ISSUE = "issue"
 CATEGORY_RELEASE = "release"
+CATEGORY_COMMIT = "commit"
 
 
 @dataclass
@@ -313,7 +321,59 @@ class GitHubCog(commands.Cog):
             )
             embed.add_field(name="タグ", value=f"`{tag}`")
             return Notification(embed, CATEGORY_RELEASE, repo)
+        # ブランチへのコミット push
+        if event == "push":
+            return self._build_push(repo, payload)
         return None
+
+    def _build_push(
+        self, repo: str, payload: dict[str, Any]
+    ) -> Notification | None:
+        """push イベントからコミット一覧の通知を作る（対象外なら None）。"""
+        cfg = self.bot.config.github
+        ref = str(payload.get("ref", ""))
+        # タグの push はリリース通知と重なるので対象外
+        if not ref.startswith(BRANCH_REF_PREFIX):
+            return None
+        branch = ref.removeprefix(BRANCH_REF_PREFIX)
+        # ブランチ指定があれば、それ以外のブランチは無視する
+        if cfg.commit_branches and branch not in cfg.commit_branches:
+            return None
+        commits = payload.get("commits") or []
+        # ブランチ削除やコミットを伴わない push は通知しない
+        if payload.get("deleted") or not commits:
+            return None
+        # 表示件数を制限し、1件1行の一覧にする（最低1件は表示）
+        shown = commits[: max(cfg.max_commits, 1)]
+        lines = [self._commit_line(commit) for commit in shown]
+        # 表示しきれなかった件数を末尾に添える
+        rest = len(commits) - len(shown)
+        if rest > 0:
+            lines.append(f"…ほか {rest} 件")
+        label = "強制 push" if payload.get("forced") else "コミット push"
+        embed = self._embed(
+            title=f"[{repo}:{branch}] {len(commits)} 件のコミット",
+            url=payload.get("compare"),
+            user=payload.get("sender") or {},
+            body=None,
+            footer=label,
+            color=COLOR_PUSH,
+        )
+        # 一覧はテンプレート除去・本文上限の対象外なので直接設定する
+        embed.description = truncate("\n".join(lines), 4000)
+        return Notification(embed, CATEGORY_COMMIT, repo)
+
+    @staticmethod
+    def _commit_line(commit: dict[str, Any]) -> str:
+        """コミット1件を「[`abc1234`](URL) 件名 - 作者」形式にする。"""
+        sha = str(commit.get("id", ""))[:SHORT_SHA_LEN]
+        # 件名（メッセージの1行目）だけを使う
+        message = str(commit.get("message", "")).splitlines()
+        subject = truncate(message[0] if message else "", COMMIT_LINE_CHARS)
+        author = commit.get("author") or {}
+        # GitHub ユーザー名が無ければ Git の作者名を使う
+        name = author.get("username") or author.get("name") or "unknown"
+        return f"[`{sha}`]({commit.get('url', '')}) {subject} - {name}"
 
     def _embed(
         self,
@@ -348,6 +408,9 @@ class GitHubCog(commands.Cog):
         # リリースは専用チャンネル → 既定チャンネルの順
         if notification.category == CATEGORY_RELEASE:
             return cfg.release_channel_id or cfg.default_channel_id
+        # コミットは専用チャンネル → 既定チャンネルの順
+        if notification.category == CATEGORY_COMMIT:
+            return cfg.commit_channel_id or cfg.default_channel_id
         # Issue / PR は番号別ルートを上から順に探す
         repo = notification.repo.lower()
         for route in cfg.issue_routes:

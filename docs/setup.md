@@ -40,7 +40,7 @@ winget install Python.Python.3.11
 
 ## 4. GitHub 通知（使う場合のみ）
 
-1. `config.yaml` の `github.enabled: true`、`github.secret` にランダムな長い文字列、送信先チャンネル（`issue_channel_id` / `issue_routes` / `release_channel_id`）を設定
+1. `config.yaml` の `github.enabled: true`、`github.secret` にランダムな長い文字列、送信先チャンネル（`issue_channel_id` / `issue_routes` / `release_channel_id` / `commit_channel_id`）を設定。コミット通知を使う場合は `github.events.push: true` も設定
 2. ボットのポート（既定 `127.0.0.1:8080`）を外部から届くようにする
    - 推奨: [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) や [ngrok](https://ngrok.com/) で `http://127.0.0.1:8080` を公開
    - ポート開放する場合は `github.host` を `"0.0.0.0"` にし、ルーターとファイアウォールで該当ポートを許可
@@ -51,7 +51,7 @@ winget install Python.Python.3.11
 | Payload URL | `https://<公開URL>/github/webhook` |
 | Content type | `application/json` |
 | Secret | `github.secret` と同じ文字列 |
-| Events | Issue comments / Issues / Releases（必要なら Pull requests / Pull request review comments も） |
+| Events | Issue comments / Issues / Releases（必要なら Pull requests / Pull request review comments / Pushes も） |
 
 登録直後に GitHub が送る `ping` に応答できれば、Webhook 画面に緑のチェックが付きます。
 `/ash status` の「GitHub通知」で待受状態を確認できます。

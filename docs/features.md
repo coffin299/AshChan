@@ -112,6 +112,7 @@ GitHub の Webhook をボット内の HTTP サーバーで受け取り、Discord
 | `pull_request` | PR の作成・クローズ・マージ・再オープン | `github.events.pull_request`（OFF） |
 | `pull_request_review_comment` | PR の差分行へのレビューコメント | `github.events.pull_request_review_comment`（OFF） |
 | `release` | リリースの公開（プレリリース含む） | `github.events.release`（ON） |
+| `push` | ブランチへのコミット push（タグ・ブランチ削除は除く） | `github.events.push`（OFF） |
 
 ### 送信先の振り分け
 
@@ -119,6 +120,7 @@ GitHub の Webhook をボット内の HTTP サーバーで受け取り、Discord
 | --- | --- |
 | Issue / PR（コメント・作成・クローズ等すべて） | `issue_routes`（番号一致）→ `issue_channel_id` → `default_channel_id` |
 | リリース | `release_channel_id` → `default_channel_id` |
+| コミット（push） | `commit_channel_id` → `default_channel_id` |
 
 `issue_routes` に番号を書くと、その Issue へのコメントも、作成・クローズ・再オープンも同じチャンネルに届きます。
 
@@ -130,7 +132,11 @@ github:
       numbers: [11]
       channel_id: 222222222222222222       # #11 専用
   release_channel_id: 333333333333333333   # リリース
+  commit_channel_id: 444444444444444444    # コミット（events.push: true が必要）
+  commit_branches: ["main"]                # 空 [] なら全ブランチ
 ```
+
+コミット通知は 1 回の push を 1 件の埋め込みにまとめ、「短縮ハッシュ（リンク）・件名・作者」を最大 `max_commits` 件まで並べます（超過分は「…ほか n 件」）。タイトルのリンクは差分比較ページです。
 
 ### その他
 

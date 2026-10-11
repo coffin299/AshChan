@@ -152,7 +152,7 @@ class IssueRoute:
 
 @dataclass
 class GitHubConfig:
-    """GitHub Webhook 受信（Issue / リリース通知）設定。"""
+    """GitHub Webhook 受信（Issue / リリース / コミット通知）設定。"""
 
     enabled: bool = False
     host: str = "127.0.0.1"
@@ -163,10 +163,13 @@ class GitHubConfig:
     issue_channel_id: int = 0
     issue_routes: list[IssueRoute] = field(default_factory=list)
     release_channel_id: int = 0
+    commit_channel_id: int = 0
+    commit_branches: list[str] = field(default_factory=list)
     events: dict[str, bool] = field(default_factory=dict)
     ignore_bots: bool = True
     max_body_chars: int = 1000
     max_release_body_chars: int = 2000
+    max_commits: int = 10
 
 
 @dataclass
@@ -292,6 +295,14 @@ def load_config(path: Path | None = None) -> Config:
     github_cfg.default_channel_id = int(github_cfg.default_channel_id or 0)
     github_cfg.issue_channel_id = int(github_cfg.issue_channel_id or 0)
     github_cfg.release_channel_id = int(github_cfg.release_channel_id or 0)
+    github_cfg.commit_channel_id = int(github_cfg.commit_channel_id or 0)
+    # ブランチ名の一覧を文字列リストへ正規化する（単一値・空要素も許容）
+    branches = github_cfg.commit_branches
+    if not isinstance(branches, list):
+        branches = [branches]
+    github_cfg.commit_branches = [
+        str(b).strip() for b in branches if str(b).strip()
+    ]
     # 番号別ルートを dataclass 化する（番号・チャンネルが無いものは捨てる）
     github_cfg.issue_routes = [
         IssueRoute(
