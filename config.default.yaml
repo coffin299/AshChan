@@ -655,8 +655,8 @@ support:
   exclude_globs: []
 
   # 埋め込みモデル（運用・rebuild-nim 用）。
-  # 型: 文字列 / 既定: "nvidia/nv-embedqa-e5-v5"
-  embedding_model: "nvidia/nv-embedqa-e5-v5"
+  # 型: 文字列 / 既定: "nvidia/nemotron-3-embed-1b"
+  embedding_model: "nvidia/nemotron-3-embed-1b"
 
   # 埋め込み API のベースURL。空なら llm.base_url を使う。
   # 型: 文字列 / 既定: ""

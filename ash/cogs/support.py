@@ -133,7 +133,9 @@ class SupportCog(commands.Cog):
         model = cfg.embedding_model
         if force_nim or kind == "rebuild-nim":
             base_url = "https://integrate.api.nvidia.com/v1"
-            model = model if "nvidia/" in model else "nvidia/nv-embedqa-e5-v5"
+            model = (
+                model if "nvidia/" in model else "nvidia/nemotron-3-embed-1b"
+            )
             api_key = (
                 self.bot.config.llm.api_key
                 or cfg.embedding_api_key

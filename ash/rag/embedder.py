@@ -116,6 +116,11 @@ class Embedder:
         base = self.model
         if base.endswith(("-passage", "-query")):
             return base
-        if "nv-embedqa" in base or "embedqa" in base or "nemotron-embed" in base:
+        if (
+            "nv-embedqa" in base
+            or "embedqa" in base
+            or "nemotron-embed" in base
+            or "nemotron-3-embed" in base
+        ):
             return f"{base}-{input_type}"
         return base

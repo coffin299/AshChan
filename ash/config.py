@@ -215,7 +215,7 @@ class SupportConfig:
     local_repo_path: str = ""
     include_globs: list[str] = field(default_factory=list)
     exclude_globs: list[str] = field(default_factory=list)
-    embedding_model: str = "nvidia/nv-embedqa-e5-v5"
+    embedding_model: str = "nvidia/nemotron-3-embed-1b"
     embedding_base_url: str = ""
     embedding_api_key: str = ""
     top_k: int = 8

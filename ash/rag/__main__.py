@@ -88,7 +88,7 @@ async def cmd_bootstrap(args: argparse.Namespace, support: SupportConfig) -> int
             return 1
         support.embedding_api_key = key
         if not args.model:
-            support.embedding_model = "nvidia/nv-embedqa-e5-v5"
+            support.embedding_model = "nvidia/nemotron-3-embed-1b"
     if args.model:
         support.embedding_model = args.model
 
