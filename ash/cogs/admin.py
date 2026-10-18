@@ -73,7 +73,15 @@ class AdminCog(commands.Cog):
             fields={
                 "稼働時間": _format_uptime(time.time() - self.bot.started_at),
                 "レイテンシ": f"{self.bot.latency * 1000:.0f} ms",
-                "LLM": f"{cfg.llm.model} / {'疎通OK' if llm_ok else '疎通NG'}",
+                "LLM": (
+                    f"{cfg.llm.model}"
+                    + (
+                        f" (+{len(cfg.llm.model_chain) - 1} fb)"
+                        if len(cfg.llm.model_chain) > 1
+                        else ""
+                    )
+                    + f" / {'疎通OK' if llm_ok else '疎通NG'}"
+                ),
                 "Web検索": _on_off(cfg.search.enabled),
                 "モデレーション": _on_off(cfg.moderation.enabled),
                 "AutoMod連携": _on_off(cfg.moderation.automod.enabled),

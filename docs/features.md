@@ -8,7 +8,8 @@
 - 1900文字を超えたら次のメッセージに続きを書く
 - チャンネル単位で直近 `llm.history_turns` 往復を記憶（`data/ashchan.db`）
 - 同じユーザーの連続呼び出しは `llm.user_cooldown_sec` の間 ⏳ リアクションで無視
-- NIM がエラーのときは dev 通知せず、`llm.fallback_replies` からランダムに1つ返す
+- `llm.model` が失敗したら `llm.models` を上から順に試す（本文を出し始める前の失敗のみ切替）
+- 全モデル失敗時は dev 通知せず、`llm.fallback_replies` からランダムに1つ返す
 - ボットの発言は誰にもメンション通知を飛ばしません
 
 ## Web検索（DuckDuckGo）

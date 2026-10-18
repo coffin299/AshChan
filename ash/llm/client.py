@@ -53,8 +53,13 @@ class LLMClient:
 
     @property
     def model(self) -> str:
-        """使用中のモデル名。"""
-        return self._config.model
+        """優先モデル名。"""
+        return self._config.model_chain[0]
+
+    @property
+    def model_chain(self) -> list[str]:
+        """フォールバック込みのモデル一覧。"""
+        return self._config.model_chain
 
     async def close(self) -> None:
         """HTTP クライアントを閉じる。"""
@@ -65,54 +70,79 @@ class LLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        """チャット補完をストリーミングし、本文差分とツール呼び出しを順に返す。"""
-        # API キー未設定は即エラーにする
+        """チャット補完をストリーミングする（失敗時は次のモデルへフォールバック）。"""
         if not self._config.api_key:
             raise LLMError("llm.api_key が未設定です")
-        # リクエストパラメータを組み立てる
+
+        chain = self.model_chain
+        last_error: LLMError | None = None
+        for index, model in enumerate(chain):
+            yielded = False
+            try:
+                async for event in self._stream_one(model, messages, tools):
+                    yielded = True
+                    yield event
+                return
+            except LLMError as exc:
+                last_error = exc
+                # 途中まで本文を出していたら混ぜない（そのまま失敗）
+                if yielded:
+                    raise
+                nxt = chain[index + 1] if index + 1 < len(chain) else None
+                if nxt:
+                    log.warning(
+                        "LLM model %s failed (%s); falling back to %s",
+                        model,
+                        exc,
+                        nxt,
+                    )
+                    continue
+                raise
+        if last_error is not None:
+            raise last_error
+        raise LLMError("no LLM models configured")
+
+    async def _stream_one(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> AsyncIterator[StreamEvent]:
+        """1 モデルでストリーミングする。"""
         params: dict[str, Any] = {
-            "model": self._config.model,
+            "model": model,
             "messages": messages,
             "temperature": self._config.temperature,
             "max_tokens": self._config.max_tokens,
             "stream": True,
         }
-        # ツールがある場合のみ tools を渡す
         if tools:
             params["tools"] = tools
             params["tool_choice"] = "auto"
 
-        # index ごとにツール呼び出しの断片を連結するバッファ
         pending: dict[int, dict[str, str]] = {}
         try:
             stream = await self._client.chat.completions.create(**params)
             async for chunk in stream:
-                # choices が空のチャンク（usage 等）は読み飛ばす
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
-                # 本文の差分があれば即座に流す
                 if delta.content:
                     yield StreamEvent(kind="text", text=delta.content)
-                # ツール呼び出しの断片を index 単位で連結する
                 for tc in delta.tool_calls or []:
                     slot = pending.setdefault(
                         tc.index, {"id": "", "name": "", "arguments": ""}
                     )
-                    # id と name は最初の断片にだけ入っていることが多い
                     if tc.id:
                         slot["id"] = tc.id
                     if tc.function and tc.function.name:
                         slot["name"] = tc.function.name
-                    # 引数 JSON は分割されて届くので連結する
                     if tc.function and tc.function.arguments:
                         slot["arguments"] += tc.function.arguments
         except (openai.APIError, openai.APIConnectionError) as exc:
-            # 失敗内容はローカルログだけに残す
-            log.warning("NIM へのリクエストに失敗しました: %s", exc)
+            log.warning("NIM request failed (model=%s): %s", model, exc)
             raise LLMError(str(exc)) from exc
 
-        # ストリーム終了後、溜まったツール呼び出しをまとめて返す
         if pending:
             calls = [
                 ToolCall(
@@ -129,7 +159,6 @@ class LLMClient:
     async def complete(self, messages: list[dict[str, Any]]) -> str:
         """ツールなしで生成し、全文をまとめて返す（短文生成用）。"""
         parts: list[str] = []
-        # ストリーミングの本文差分を連結する
         async for event in self.stream_chat(messages):
             if event.kind == "text":
                 parts.append(event.text)
@@ -137,7 +166,6 @@ class LLMClient:
 
     async def ping(self) -> bool:
         """API の疎通確認（モデル一覧取得が成功するか）。"""
-        # キー未設定なら疎通不可
         if not self._config.api_key:
             return False
         try:

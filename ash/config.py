@@ -48,6 +48,8 @@ class LLMConfig:
     api_key: str = ""
     base_url: str = "https://integrate.api.nvidia.com/v1"
     model: str = "meta/llama-3.3-70b-instruct"
+    # 優先モデルのあとに試すフォールバック（model 自身は含めなくてよい）
+    models: list[str] = field(default_factory=list)
     prompt_file: str = "prompt.md"
     temperature: float = 0.8
     max_tokens: int = 800
@@ -56,6 +58,16 @@ class LLMConfig:
     stream_edit_interval_sec: float = 2.0
     timeout_sec: float = 60.0
     fallback_replies: list[str] = field(default_factory=list)
+
+    @property
+    def model_chain(self) -> list[str]:
+        """優先モデル → フォールバックの重複なしリスト。"""
+        chain: list[str] = []
+        for name in (self.model, *self.models):
+            text = str(name).strip()
+            if text and text not in chain:
+                chain.append(text)
+        return chain or ["meta/llama-3.3-70b-instruct"]
 
 
 @dataclass
@@ -404,6 +416,18 @@ def load_config(path: Path | None = None) -> Config:
         ]
     else:
         support_cfg.exclude_globs = [str(g) for g in support_cfg.exclude_globs]
+
+    # LLM フォールバック一覧を正規化する（単一文字列でもリスト化）
+    raw_models = llm_cfg.models
+    if isinstance(raw_models, str):
+        raw_models = [raw_models]
+    elif not isinstance(raw_models, list):
+        raw_models = []
+    llm_cfg.models = [str(m).strip() for m in raw_models if str(m).strip()]
+    # model が空なら models の先頭を優先モデルにする
+    if not str(llm_cfg.model or "").strip() and llm_cfg.models:
+        llm_cfg.model = llm_cfg.models[0]
+    llm_cfg.model = str(llm_cfg.model or "").strip() or "meta/llama-3.3-70b-instruct"
 
     # 環境変数があれば秘密情報を上書きする
     discord_cfg.token = os.environ.get(ENV_DISCORD_TOKEN) or discord_cfg.token

@@ -135,7 +135,10 @@ class AshBot(commands.Bot):
                 "アッシュ起動",
                 f"{self.user} としてログインしました。",
                 COLOR_INFO,
-                {"サーバー数": str(len(self.guilds)), "モデル": self.config.llm.model},
+                {
+                    "サーバー数": str(len(self.guilds)),
+                    "モデル": " → ".join(self.config.llm.model_chain),
+                },
             )
         )
 

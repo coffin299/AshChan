@@ -37,6 +37,7 @@ winget install Python.Python.3.11
 1. [build.nvidia.com](https://build.nvidia.com) にログインし API キー（`nvapi-...`）を発行
 2. `config.yaml` の `llm.api_key` へ設定
 3. Web検索を使う場合は Tool Calling 対応モデルを `llm.model` に指定（既定の `meta/llama-3.3-70b-instruct` は対応）
+4. 混雑時用に `llm.models` へフォールバックモデルを並べられる（`model` 失敗時に上から順に試行）
 
 ## 4. GitHub 通知（使う場合のみ）
 

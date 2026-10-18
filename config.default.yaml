@@ -72,10 +72,20 @@ llm:
   # 型: 文字列 / 既定: "https://integrate.api.nvidia.com/v1"
   base_url: "https://integrate.api.nvidia.com/v1"
 
-  # 使用するモデル名。build.nvidia.com のモデルページに書かれている ID を指定。
+  # 優先して使うモデル名。build.nvidia.com のモデルページに書かれている ID を指定。
   # Web検索（search.enabled）を使う場合は Tool Calling 対応モデルが必要です。
   # 型: 文字列 / 既定: "meta/llama-3.3-70b-instruct"
+  # 例: "deepseek-ai/deepseek-v3.1"
   model: "meta/llama-3.3-70b-instruct"
+
+  # モデルフォールバック（上から順に試す）。model が失敗（混雑・5xx・タイムアウト等）したら次へ。
+  # model と同じ ID は重複排除される。空 [] ならフォールバックなし。
+  # 型: 文字列のリスト / 既定: []
+  # 例:
+  #   models:
+  #     - "deepseek-ai/deepseek-v3.1"
+  #     - "meta/llama-3.3-70b-instruct"
+  models: []
 
   # システムプロンプト（キャラ設定）のファイルパス。config.yaml からの相対パス。
   # /ash reload で再読込できます。
