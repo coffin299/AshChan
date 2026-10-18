@@ -165,9 +165,10 @@ github:
 - LLM / RAG 失敗時は 30 秒間隔で最大 3 回再試行。だめなら管理者メンション + 失敗 V2（ボタン無効）+ スレ `failed`
 - 「開発者に聞く」時は会話履歴と `.txt`/`.log` から **開発者向け引き継ぎメモ**（症状・環境・再現・ログ要点・未解決点など）を LLM で生成してメンション付き投稿
 - ナレッジ: `coffin299/VRCast` の docs + ソース（`include_globs` / `exclude_globs`）
+- ヘルプサイト: `support.help_ref`（既定 `webpage`）から `help/`・`ja/help/`・`llms.txt` を取得し HTML をテキスト化してインデックス（[公開ヘルプ](https://coffin299.github.io/VRCast/help/) 相当）
 - 初回: `bootstrap_rag.bat`（LM Studio）または `python -m ash.rag bootstrap`
 - 本番揃え: `/ash rag rebuild-nim`（NIM 全文再構築、40RPM）。`local_repo_path` が空なら GitHub から取得
-- リリース Webhook: 対象 repo の published で差分 sync（ローカル無ければ Compare API）
+- リリース Webhook: 対象 repo の published で差分 sync（ローカル無ければ Compare API）。ヘルプはリリースと独立に毎回再取得
 
 ## 管理コマンド
 

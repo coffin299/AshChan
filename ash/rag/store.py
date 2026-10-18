@@ -108,6 +108,15 @@ class RagStore:
         await self.conn.execute("DELETE FROM rag_chunks WHERE path = ?", (path,))
         await self.conn.commit()
 
+    async def delete_path_prefix(self, prefix: str) -> int:
+        """パス接頭辞に一致するチャンクを削除し、件数を返す。"""
+        cursor = await self.conn.execute(
+            "DELETE FROM rag_chunks WHERE path LIKE ?",
+            (f"{prefix}%",),
+        )
+        await self.conn.commit()
+        return int(cursor.rowcount or 0)
+
     async def replace_file_chunks(
         self,
         path: str,
@@ -153,11 +162,13 @@ class RagStore:
         current = await self.get_meta("current_tag")
         model = await self.get_meta("embed_model")
         indexed_at = await self.get_meta("indexed_at")
+        help_ref = await self.get_meta("help_ref")
         return {
             "chunk_count": count,
             "current_tag": current,
             "embed_model": model,
             "indexed_at": float(indexed_at) if indexed_at else 0.0,
+            "help_ref": help_ref or "",
         }
 
     async def load_all_embeddings(self) -> list[StoredChunk]:

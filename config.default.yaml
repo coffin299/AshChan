@@ -655,6 +655,16 @@ support:
   # 型: 文字列 / 既定: ""
   github_token: ""
 
+  # ヘルプサイト用の Git ブランチ / タグ（空なら取り込まない）。
+  # https://coffin299.github.io/VRCast/help/ は webpage ブランチの help/ 相当。
+  # bootstrap / sync / rebuild-nim のたびに再取得する。
+  # 型: 文字列 / 既定: "webpage"
+  help_ref: "webpage"
+
+  # ヘルプサイト側の取り込み glob（空ならコード既定: help HTML + ja/help + llms.txt）。
+  # 型: 文字列のリスト
+  help_include_globs: []
+
   # インデックス対象の glob（空ならコード既定）。
   # 型: 文字列のリスト
   include_globs: []

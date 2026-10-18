@@ -18,6 +18,7 @@ import aiohttp
 from ash.config import SupportConfig
 from ash.rag.chunker import chunk_file
 from ash.rag.embedder import EmbedError, Embedder
+from ash.rag.html_text import html_to_text
 from ash.rag.store import RagStore
 
 log = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ log = logging.getLogger(__name__)
 ProgressCallback = Callable[[str, int, int], Awaitable[None] | None]
 GITHUB_API = "https://api.github.com"
 RAW_BASE = "https://raw.githubusercontent.com"
+HELP_PATH_PREFIX = "__help__/"
 
 
 class RagJobCancelled(Exception):
@@ -92,6 +94,7 @@ class RagIndexer:
         else:
             log.info("RAG bootstrap via GitHub remote (%s @ %s)", self.config.repo, tag)
             chunk_total = await self._bootstrap_github(tag, on_progress)
+        chunk_total += await self.index_help_site(tag=tag, on_progress=on_progress)
         await self.store.set_meta("current_tag", tag)
         await self.store.set_meta("embed_model", self.embedder.model)
         await self.store.set_meta("indexed_at", str(time.time()))
@@ -221,6 +224,98 @@ class RagIndexer:
         path = f"__release__/{tag}.md"
         return await self._index_text(path, body, tag)
 
+    async def index_help_site(
+        self,
+        *,
+        tag: str,
+        on_progress: ProgressCallback | None = None,
+    ) -> int:
+        """webpage ブランチ等のヘルプ HTML / llms.txt をインデックスする。
+
+        https://coffin299.github.io/VRCast/help/ 相当の内容を GitHub の
+        ``help_ref`` から取得し、``__help__/...`` パスで保存する。
+        """
+        ref = (self.config.help_ref or "").strip()
+        if not ref:
+            return 0
+        log.info("RAG help site via GitHub (%s @ %s)", self.config.repo, ref)
+        # force 無しの再インデックスでも古いヘルプを残さない
+        await self.store.delete_path_prefix(HELP_PATH_PREFIX)
+        try:
+            paths = await self._github_list_help_paths(ref)
+        except EmbedError as exc:
+            log.warning("help site index skipped: %s", exc)
+            return 0
+        if not paths:
+            log.warning("help site: no matching files under ref=%s", ref)
+            return 0
+
+        total = len(paths)
+        done = 0
+        chunk_total = 0
+        async with aiohttp.ClientSession() as session:
+            for rel in paths:
+                self._check_cancel()
+                text = await self._github_fetch_file(session, ref, rel)
+                if text is None:
+                    done += 1
+                    continue
+                body = self._help_body_for_path(rel, text)
+                if not body.strip():
+                    done += 1
+                    continue
+                store_path = f"{HELP_PATH_PREFIX}{rel}"
+                chunk_total += await self._index_text(store_path, body, tag)
+                done += 1
+                await self._progress(
+                    on_progress, f"help {rel}", done, total
+                )
+
+        await self.store.set_meta("help_ref", ref)
+        await self.store.set_meta("help_indexed_at", str(time.time()))
+        log.info("RAG help site indexed: files=%s chunks=%s", total, chunk_total)
+        return chunk_total
+
+    @staticmethod
+    def _help_body_for_path(rel: str, text: str) -> str:
+        lower = rel.replace("\\", "/").lower()
+        if lower.endswith((".html", ".htm")):
+            return html_to_text(text)
+        return text
+
+    async def _github_list_help_paths(self, ref: str) -> list[str]:
+        """help_include_globs に合うパスを列挙する。"""
+        owner, name = self._owner_repo()
+        url = f"{GITHUB_API}/repos/{owner}/{name}/git/trees/{ref}?recursive=1"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=self._github_headers()) as resp:
+                if resp.status == 404:
+                    raise EmbedError(f"GitHub help ref not found: {ref}")
+                if resp.status == 403:
+                    raise EmbedError(
+                        "GitHub API rate limited; set support.github_token "
+                        "(or GITHUB_TOKEN)"
+                    )
+                resp.raise_for_status()
+                data = await resp.json()
+        if data.get("truncated"):
+            log.warning("GitHub help tree truncated; some files may be missing")
+        paths: list[str] = []
+        for item in data.get("tree") or []:
+            if item.get("type") != "blob":
+                continue
+            rel = str(item.get("path") or "").replace("\\", "/")
+            if rel and self._help_path_included(rel):
+                paths.append(rel)
+        return paths
+
+    def _help_path_included(self, rel: str) -> bool:
+        posix = rel.replace("\\", "/")
+        for pattern in self.config.help_include_globs:
+            if self._glob_match(posix, pattern):
+                return True
+        return False
+
     async def fetch_latest_release_tag(self) -> str:
         """GitHub の最新リリースタグを返す。"""
         owner, name = self._owner_repo()
@@ -261,13 +356,16 @@ class RagIndexer:
             )
             return ("", target, n)
         if current == target:
-            return (current, target, 0)
+            # リリースは変わらなくてもヘルプサイトは別ブランチなので再取得
+            help_n = await self.index_help_site(tag=target, on_progress=on_progress)
+            return (current, target, help_n)
         n = await self.apply_diff(
             repo_path=repo_path,
             from_tag=current,
             to_tag=target,
             on_progress=on_progress,
         )
+        n += await self.index_help_site(tag=target, on_progress=on_progress)
         return (current, target, n)
 
     # ------------------------------------------------------------
@@ -450,10 +548,31 @@ class RagIndexer:
                 return True
             if fnmatch.fnmatch(posix.split("/")[-1], tail):
                 return True
+            parts = posix.split("/")
+            for i in range(len(parts)):
+                if fnmatch.fnmatch("/".join(parts[i:]), tail):
+                    return True
             if tail.endswith("/**"):
                 fragment = tail[:-3]
                 if f"/{fragment}/" in f"/{posix}/" or posix.startswith(f"{fragment}/"):
                     return True
+        # 途中の **（例: help/**/*.html）
+        if "/**/" in pattern:
+            prefix, suffix = pattern.split("/**/", 1)
+            if posix == prefix or posix.startswith(f"{prefix}/"):
+                rest = posix[len(prefix) :].lstrip("/")
+                if fnmatch.fnmatch(rest, suffix):
+                    return True
+                parts = rest.split("/") if rest else []
+                for i in range(len(parts)):
+                    if fnmatch.fnmatch("/".join(parts[i:]), suffix):
+                        return True
+                if parts and fnmatch.fnmatch(parts[-1], suffix):
+                    return True
+        elif pattern.endswith("/**"):
+            prefix = pattern[:-3]
+            if posix == prefix or posix.startswith(f"{prefix}/"):
+                return True
         return False
 
     def _read_text(self, path: Path) -> str | None:

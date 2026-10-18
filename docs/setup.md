@@ -71,7 +71,7 @@ winget install Python.Python.3.11
 | `support.repo` | 既定 `coffin299/VRCast` |
 | `support.github_token` | GitHub API 用トークン（remote 取得の推奨）。`GITHUB_TOKEN` 環境変数でも可 |
 
-3. 初回インデックス: ローカルなら `bootstrap_rag.bat`（LM Studio）、本番は `/ash rag rebuild-nim`（パス空でも GitHub から取得可）
+3. 初回インデックス: ローカルなら `bootstrap_rag.bat`（LM Studio）、本番は `/ash rag rebuild-nim`（パス空でも GitHub から取得可）。ヘルプサイト（`webpage` ブランチ）も同時に取り込む
 4. 以降は GitHub Releases Webhook または `/ash rag sync` で差分更新
 
 ボットにはフォーラムでの「メッセージ送信」「スレッド管理」（タグ付与・アーカイブ）権限が必要です。

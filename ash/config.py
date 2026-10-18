@@ -217,6 +217,9 @@ class SupportConfig:
     local_repo_path: str = ""
     # RAG の GitHub API 用（remote bootstrap / sync）。Webhook secret とは別
     github_token: str = ""
+    # ヘルプサイト用ブランチ（空なら取り込まない）。例: webpage → github.io/VRCast/help/
+    help_ref: str = "webpage"
+    help_include_globs: list[str] = field(default_factory=list)
     include_globs: list[str] = field(default_factory=list)
     exclude_globs: list[str] = field(default_factory=list)
     embedding_model: str = "nvidia/nemotron-3-embed-1b"
@@ -420,6 +423,17 @@ def load_config(path: Path | None = None) -> Config:
         ]
     else:
         support_cfg.exclude_globs = [str(g) for g in support_cfg.exclude_globs]
+    if not support_cfg.help_include_globs:
+        support_cfg.help_include_globs = [
+            "help/**/*.html",
+            "ja/help/**/*.html",
+            "llms.txt",
+        ]
+    else:
+        support_cfg.help_include_globs = [
+            str(g) for g in support_cfg.help_include_globs if str(g).strip()
+        ]
+    support_cfg.help_ref = str(support_cfg.help_ref or "").strip()
 
     # LLM フォールバック一覧を正規化する（単一文字列でもリスト化）
     raw_models = llm_cfg.models

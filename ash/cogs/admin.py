@@ -191,6 +191,9 @@ class AdminCog(commands.Cog):
             else "-"
         )
         busy = "実行中" if support.rag_busy else "idle"  # type: ignore[attr-defined]
+        help_ref = str(
+            status.get("help_ref") or self.bot.config.support.help_ref or "-"
+        )
         embed = make_embed(
             "RAG 状態",
             "",
@@ -200,6 +203,7 @@ class AdminCog(commands.Cog):
                 "embed_model": str(status.get("embed_model") or "-"),
                 "chunks": str(status.get("chunk_count") or 0),
                 "indexed_at": when,
+                "help_ref": help_ref,
                 "job": busy,
                 "repo": self.bot.config.support.repo,
             },

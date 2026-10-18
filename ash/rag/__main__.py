@@ -131,7 +131,8 @@ async def cmd_diff(args: argparse.Namespace, support: SupportConfig) -> int:
         n = await indexer.apply_diff(
             from_tag=from_tag, to_tag=to_tag, on_progress=_progress
         )
-        print(f"Done. chunks_updated≈{n}")
+        help_n = await indexer.index_help_site(tag=to_tag, on_progress=_progress)
+        print(f"Done. chunks_updated≈{n} help_chunks={help_n}")
         return 0
     except (EmbedError, RagJobCancelled, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
