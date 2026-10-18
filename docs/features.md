@@ -163,7 +163,7 @@ github:
 - 完了後は Components V2: 本文 + `footer_hint` + 「解決した」「開発者に聞く」（**最新メッセージのみ**）
 - `.txt` / `.log` 添付を読み取り、プロンプトに注入
 - LLM / RAG 失敗時は 30 秒間隔で最大 3 回再試行。だめなら管理者メンション + 失敗 V2（ボタン無効）+ スレ `failed`
-- 「開発者に聞く」時は会話履歴と `.txt`/`.log` から **開発者向け引き継ぎメモ**（症状・環境・再現・ログ要点・未解決点など）を LLM で生成してメンション付き投稿
+- 「開発者に聞く」時は会話履歴・`.txt`/`.log`・RAG から **開発者向け引き継ぎメモ**（症状・環境・再現・ログ要点・未解決点・**コード修正案の方向性**など）を LLM で生成してメンション付き投稿。完成パッチではなく調査・修正の方針まで
 - ナレッジ: `coffin299/VRCast` の docs + ソース（`include_globs` / `exclude_globs`）
 - ヘルプサイト: `support.help_ref`（既定 `webpage`）から `help/`・`ja/help/`・`llms.txt` を取得し HTML をテキスト化してインデックス（[公開ヘルプ](https://coffin299.github.io/VRCast/help/) 相当）
 - 手動ドキュメント: Discord に txt/md 等を投げて `/ash rag ingest <メッセージID or リンク>`

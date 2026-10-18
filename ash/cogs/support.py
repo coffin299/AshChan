@@ -876,7 +876,7 @@ class SupportCog(commands.Cog):
         )
 
     async def _build_developer_brief(self, thread: discord.Thread) -> str:
-        """会話履歴とログ添付から開発者向けの詳細まとめを作る。"""
+        """会話履歴・ログ・RAG から開発者向け引き継ぎメモを作る。"""
         history = await self.bot.db.get_history(thread.id, 40)
         history_text = "\n".join(
             f"{item['role']}: {item['content']}" for item in history
@@ -884,11 +884,30 @@ class SupportCog(commands.Cog):
         logs = await self._collect_thread_logs(thread)
         logs_block = logs if logs.strip() else "（.txt / .log 添付なし、または読めず）"
 
+        # 症状に近いコード片を拾って修正方針の根拠にする
+        rag_block = ""
+        try:
+            retriever = await self._get_retriever()
+            query = (
+                f"{thread.name}\n{history_text[-4000:]}\n{logs_block[:2000]}"
+            ).strip()
+            hits = await retriever.retrieve(query)
+            rag_block = RagRetriever.format_context(hits)
+        except EmbedError as exc:
+            log.warning("developer brief RAG failed: %s", exc)
+
         system = (
             "あなたは VRCast のサポートから開発者への引き継ぎ担当。"
             "口調は簡潔な技術メモ（ですます調でも箇条書きでも可）。"
             "キャラ演技は不要。絵文字も不要。"
             "ユーザー向け説明ではなく、開発者がすぐ着手できる情報をまとめる。"
+            "コード修正案は「方向性・調査ポイント」まで。"
+            "完成パッチや断定的な一行修正は書かない。根拠が弱い箇所は推測と明記する。"
+        )
+        rag_section = (
+            f"## 参照コード／ドキュメント（RAG）\n{rag_block[:12000]}\n\n"
+            if rag_block.strip()
+            else "## 参照コード／ドキュメント（RAG）\n（ヒットなし）\n\n"
         )
         user = (
             f"フォーラムスレ名: {thread.name}\n"
@@ -897,6 +916,7 @@ class SupportCog(commands.Cog):
             f"{history_text[:12000]}\n\n"
             "## 添付ログ抜粋\n"
             f"{logs_block[:10000]}\n\n"
+            f"{rag_section}"
             "上記から開発者向け引き継ぎメモを日本語で作成せよ。必ず次の見出しを含める:\n"
             "### 症状まとめ\n"
             "### 環境・バージョン（分かれば）\n"
@@ -905,7 +925,13 @@ class SupportCog(commands.Cog):
             "### ボットが試したこと / 案内したこと\n"
             "### 未解決点・確認してほしいこと\n"
             "### 関連しそうな機能・ファイル（推測可・断定しない）\n"
-            "不明な項目は「不明」と書く。推測は推測と明記。全体はだいたい1200〜1800文字。"
+            "### コード修正案の方向性\n"
+            "（必須。RAG や症状から、どこをどう直しそうかの方針を2〜5点。"
+            "例: 対象ファイル／クラス、疑わしい分岐、追加すべきガード、ログ確認箇所。"
+            "確定パッチは書かず「要確認」「推測」を付ける。"
+            "根拠が無ければ「追加調査が必要」と書く。）\n"
+            "不明な項目は「不明」と書く。推測は推測と明記。"
+            "全体はだいたい1500〜2200文字。"
         )
         try:
             brief = await self.bot.llm.complete(
@@ -915,7 +941,7 @@ class SupportCog(commands.Cog):
                 ]
             )
             if brief.strip():
-                return brief.strip()[:4000]
+                return brief.strip()[:4500]
         except LLMError as exc:
             log.warning("developer brief LLM failed: %s", exc)
 
@@ -930,6 +956,8 @@ class SupportCog(commands.Cog):
             logs_block[:800],
             "### 未解決点・確認してほしいこと",
             "- 上記を直接確認してください",
+            "### コード修正案の方向性",
+            "- （自動生成失敗のため未作成。RAG/ログを直接確認してください）",
         ]
         return "\n".join(fallback)
 
