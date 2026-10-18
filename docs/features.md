@@ -166,8 +166,10 @@ github:
 - 「開発者に聞く」時は会話履歴と `.txt`/`.log` から **開発者向け引き継ぎメモ**（症状・環境・再現・ログ要点・未解決点など）を LLM で生成してメンション付き投稿
 - ナレッジ: `coffin299/VRCast` の docs + ソース（`include_globs` / `exclude_globs`）
 - ヘルプサイト: `support.help_ref`（既定 `webpage`）から `help/`・`ja/help/`・`llms.txt` を取得し HTML をテキスト化してインデックス（[公開ヘルプ](https://coffin299.github.io/VRCast/help/) 相当）
+- 手動ドキュメント: Discord に txt/md 等を投げて `/ash rag ingest <メッセージID or リンク>`
+- 過去サポート: `/ash rag history` でフォーラムの過去スレ（解決済み・未解決・アーカイブ含む）を取り込み
 - 初回: `bootstrap_rag.bat`（LM Studio）または `python -m ash.rag bootstrap`
-- 本番揃え: `/ash rag rebuild-nim`（NIM 全文再構築、40RPM）。`local_repo_path` が空なら GitHub から取得
+- 本番揃え: `/ash rag rebuild-nim`（NIM 全文再構築、40RPM）。`local_repo_path` が空なら GitHub から取得。手動取り込み・過去サポートは rebuild 後も残る
 - リリース Webhook: 対象 repo の published で差分 sync（ローカル無ければ Compare API）。ヘルプはリリースと独立に毎回再取得
 
 ## 管理コマンド
@@ -183,6 +185,8 @@ github:
 | `/ash rag status` | RAG のタグ・チャンク数・埋め込みモデル |
 | `/ash rag sync [tag]` | 最新（または指定）リリースまで差分更新 |
 | `/ash rag rebuild-nim [tag]` | NIM で全文作り直し（初回ローカル後の本番用） |
+| `/ash rag ingest <message>` | 指定メッセージの添付（txt/md 等）を手動取り込み。メッセージリンク可 |
+| `/ash rag history [limit]` | 過去サポートスレを取り込み（解決済み含む・バックグラウンド） |
 | `/ash rag cancel` | 実行中の RAG ジョブをキャンセル |
 
 ## 通知先

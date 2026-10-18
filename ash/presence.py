@@ -93,6 +93,8 @@ class PresenceManager:
         cfg = self._cfg
         if self._rag_kind == "rebuild-nim":
             return [cfg.rag_rebuild]
+        if self._rag_kind == "history":
+            return [cfg.rag_history or "過去サポート取込中"]
         if self._rag_kind == "sync":
             return [cfg.rag_sync]
         if self._rag_kind:

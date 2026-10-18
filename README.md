@@ -18,7 +18,7 @@ VRChat の ASH ちゃん風キャラクター「アッシュ」が住む Discord
 | 自動ロール | 新規参加者に指定ロールを自動付与（メンバーシップ審査の通過待ちにも対応） |
 | GitHub 通知 | GitHub Webhook を受信し、Issue / PR のコメント・状態変化、リリース、コミットを通知。Issue 番号ごと・リリース用・コミット用に送信先チャンネルを指定可能（署名検証あり） |
 | VRCast サポート RAG | 指定フォーラムの新規スレに自動応答。リプライで継続。コードベース RAG + Components V2（解決／開発者エスカレーション）。初回は `bootstrap_rag.bat`（LM Studio）、本番は `/ash rag rebuild-nim` |
-| 管理コマンド | `/ash status` `/ash reload` `/ash honeypot …` `/ash rag status|sync|rebuild-nim|cancel` |
+| 管理コマンド | `/ash status` `/ash reload` `/ash honeypot …` `/ash rag status|sync|rebuild-nim|ingest|history|cancel` |
 
 詳細は [docs/features.md](docs/features.md) を参照してください。
 

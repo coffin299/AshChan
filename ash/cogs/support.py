@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -27,12 +28,29 @@ from ash.llm.support_status import (
 )
 from ash.notifier import COLOR_DANGER, COLOR_INFO, make_embed
 from ash.rag.embedder import EmbedError, Embedder
+from ash.rag.html_text import html_to_text
 from ash.rag.indexer import RagIndexer, RagJobCancelled
 from ash.rag.retriever import RagRetriever
 from ash.rag.store import RagStore
 
 log = logging.getLogger(__name__)
 JST = timezone(timedelta(hours=9))
+
+# /ash rag ingest で取り込む添付の拡張子
+INGEST_EXTENSIONS = (
+    ".txt",
+    ".md",
+    ".markdown",
+    ".log",
+    ".csv",
+    ".json",
+    ".yml",
+    ".yaml",
+    ".toml",
+    ".xml",
+    ".html",
+    ".htm",
+)
 
 DEFAULT_SUPPORT_PROMPT = """
 ## サポートモード
@@ -118,17 +136,96 @@ class SupportCog(commands.Cog):
         *,
         force_nim: bool = False,
         to_tag: str | None = None,
+        history_limit: int = 0,
+        include_archived: bool = True,
     ) -> str:
-        """kind: rebuild-nim | sync。二重実行時はエラー文字列。"""
+        """kind: rebuild-nim | sync | history。二重実行時はエラー文字列。"""
         if self.rag_busy:
             return "already_running"
         self.bot.presence.set_rag(kind)
         asyncio.create_task(self.bot.presence.bump(), name="presence-rag-start")
         self._job_task = asyncio.create_task(
-            self._run_rag_job(kind, force_nim=force_nim, to_tag=to_tag),
+            self._run_rag_job(
+                kind,
+                force_nim=force_nim,
+                to_tag=to_tag,
+                history_limit=history_limit,
+                include_archived=include_archived,
+            ),
             name=f"rag-{kind}",
         )
         return "started"
+
+    async def ingest_message_documents(
+        self,
+        *,
+        channel: discord.abc.Messageable,
+        message_id: int,
+    ) -> dict[str, Any]:
+        """指定メッセージのテキスト添付を RAG に取り込む。"""
+        if self.rag_busy:
+            return {"ok": False, "error": "already_running"}
+        try:
+            message = await channel.fetch_message(message_id)
+        except discord.NotFound:
+            return {"ok": False, "error": "message_not_found"}
+        except discord.HTTPException as exc:
+            return {"ok": False, "error": f"fetch_failed: {exc}"}
+
+        files = self._ingestible_attachments(message)
+        if not files:
+            return {
+                "ok": False,
+                "error": "no_documents",
+                "hint": "対応拡張子: " + ", ".join(sorted(INGEST_EXTENSIONS)),
+            }
+
+        cfg = self.bot.config.support
+        indexer = RagIndexer(
+            self._rag_store,
+            cfg,
+            api_key=cfg.embedding_api_key or self.bot.config.llm.api_key,
+            base_url=cfg.embedding_base_url or self.bot.config.llm.base_url,
+            model=cfg.embedding_model,
+        )
+        indexed: list[str] = []
+        skipped: list[str] = []
+        chunk_total = 0
+        try:
+            for att in files:
+                text = await self._read_attachment_text(att)
+                if text is None or not text.strip():
+                    skipped.append(att.filename or "(unnamed)")
+                    continue
+                n = await indexer.index_manual_document(
+                    message_id=message_id,
+                    filename=att.filename or "document.txt",
+                    text=text,
+                )
+                if n <= 0:
+                    skipped.append(att.filename or "(unnamed)")
+                    continue
+                chunk_total += n
+                indexed.append(f"{att.filename} ({n})")
+        except (EmbedError, RagJobCancelled) as exc:
+            return {"ok": False, "error": str(exc)}
+        finally:
+            await indexer.close()
+
+        if not indexed:
+            return {
+                "ok": False,
+                "error": "empty_or_unreadable",
+                "skipped": skipped,
+            }
+        self.invalidate_retriever()
+        return {
+            "ok": True,
+            "chunks": chunk_total,
+            "files": indexed,
+            "skipped": skipped,
+            "message_id": message_id,
+        }
 
     async def _run_rag_job(
         self,
@@ -136,6 +233,8 @@ class SupportCog(commands.Cog):
         *,
         force_nim: bool,
         to_tag: str | None,
+        history_limit: int = 0,
+        include_archived: bool = True,
     ) -> None:
         cfg = self.bot.config.support
         api_key = cfg.embedding_api_key
@@ -170,6 +269,16 @@ class SupportCog(commands.Cog):
                     tag=tag, force=True, on_progress=on_progress
                 )
                 summary = f"rebuild-nim 完了 tag=`{tag}` chunks={n}"
+            elif kind == "history":
+                threads_n, chunk_n = await self._index_support_history(
+                    indexer,
+                    limit=history_limit,
+                    include_archived=include_archived,
+                    on_progress=on_progress,
+                )
+                summary = (
+                    f"history 完了 threads={threads_n} chunks={chunk_n}"
+                )
             else:
                 prev, target, n = await indexer.compare_and_sync(
                     to_tag=to_tag, on_progress=on_progress
@@ -198,6 +307,183 @@ class SupportCog(commands.Cog):
             self._job_indexer = None
             self.bot.presence.set_rag(None)
             await self.bot.presence.bump()
+
+    async def _index_support_history(
+        self,
+        indexer: RagIndexer,
+        *,
+        limit: int,
+        include_archived: bool,
+        on_progress: Any,
+    ) -> tuple[int, int]:
+        """設定フォーラムの過去スレ（解決済み含む）を RAG に載せる。"""
+        cfg = self.bot.config.support
+        forum_ids = list(cfg.forum_channel_ids)
+        if not forum_ids:
+            raise EmbedError("support.forum_channel_ids が空です")
+
+        threads: list[discord.Thread] = []
+        for forum_id in forum_ids:
+            channel = self.bot.get_channel(forum_id)
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(forum_id)
+                except discord.HTTPException as exc:
+                    log.warning("history: forum %s fetch failed: %s", forum_id, exc)
+                    continue
+            if not isinstance(channel, discord.ForumChannel):
+                log.warning("history: %s is not a forum channel", forum_id)
+                continue
+            for t in channel.threads:
+                threads.append(t)
+            if include_archived:
+                try:
+                    async for t in channel.archived_threads(limit=None):
+                        threads.append(t)
+                except discord.HTTPException as exc:
+                    log.warning(
+                        "history: archived_threads failed for %s: %s",
+                        forum_id,
+                        exc,
+                    )
+
+        # 重複排除（アクティブとアーカイブで二重に来ることは稀だが念のため）
+        seen: set[int] = set()
+        unique: list[discord.Thread] = []
+        for t in threads:
+            if t.id in seen:
+                continue
+            seen.add(t.id)
+            unique.append(t)
+
+        # 新しい順 → 古い順どちらでもよいが、limit 用に新しい方を優先
+        unique.sort(key=lambda t: t.id, reverse=True)
+        if limit > 0:
+            unique = unique[:limit]
+
+        total = len(unique)
+        done = 0
+        chunk_total = 0
+        indexed_threads = 0
+        for thread in unique:
+            indexer._check_cancel()
+            body = await self._format_thread_transcript(thread)
+            if not body.strip():
+                done += 1
+                if on_progress:
+                    result = on_progress(f"skip {thread.id}", done, total)
+                    if asyncio.iscoroutine(result):
+                        await result
+                continue
+            status = await self._resolve_thread_status(thread)
+            n = await indexer.index_support_history_thread(
+                thread_id=thread.id,
+                title=thread.name or f"thread-{thread.id}",
+                status=status,
+                body=body,
+            )
+            chunk_total += n
+            if n > 0:
+                indexed_threads += 1
+            done += 1
+            if on_progress:
+                result = on_progress(
+                    f"thread {thread.name}", done, total
+                )
+                if asyncio.iscoroutine(result):
+                    await result
+
+        await self._rag_store.set_meta(
+            "support_history_indexed_at",
+            str(time.time()),
+        )
+        return indexed_threads, chunk_total
+
+    async def _resolve_thread_status(self, thread: discord.Thread) -> str:
+        """DB / フォーラムタグから解決状態を推定する。"""
+        state = await self.bot.db.get_support_thread(thread.id)
+        db_status = str(state.get("status") or "").strip()
+        if db_status:
+            return db_status
+        tag_name = self.bot.config.support.resolved_tag_name.strip()
+        if tag_name:
+            for tag in thread.applied_tags:
+                if tag.name == tag_name:
+                    return "resolved"
+        if thread.archived:
+            return "archived"
+        return "open"
+
+    async def _format_thread_transcript(
+        self, thread: discord.Thread, *, message_limit: int = 150
+    ) -> str:
+        """スレ会話を RAG 用テキストにまとめる。"""
+        max_chars = self.bot.config.support.max_file_chars
+        lines: list[str] = []
+        used = 0
+        try:
+            async for message in thread.history(
+                limit=message_limit, oldest_first=True
+            ):
+                if used >= max_chars:
+                    break
+                author = getattr(message.author, "display_name", None) or "user"
+                bot_mark = " [bot]" if message.author.bot else ""
+                content = (message.content or "").strip()
+                att_names = [
+                    a.filename
+                    for a in message.attachments
+                    if a.filename
+                ]
+                if not content and not att_names:
+                    continue
+                entry = (
+                    f"**{author}{bot_mark}**: {content}"
+                    if content
+                    else f"**{author}{bot_mark}**:"
+                )
+                if att_names:
+                    entry += f"\n(添付: {', '.join(att_names)})"
+                remain = max_chars - used
+                if len(entry) > remain:
+                    entry = entry[:remain]
+                lines.append(entry)
+                used += len(entry) + 1
+        except discord.HTTPException as exc:
+            log.warning("transcript failed for %s: %s", thread.id, exc)
+            return ""
+        return "\n\n".join(lines)
+
+    @staticmethod
+    def _ingestible_attachments(
+        message: discord.Message,
+    ) -> list[discord.Attachment]:
+        out: list[discord.Attachment] = []
+        for att in message.attachments:
+            name = (att.filename or "").lower()
+            if any(name.endswith(ext) for ext in INGEST_EXTENSIONS):
+                out.append(att)
+        return out
+
+    async def _read_attachment_text(
+        self, att: discord.Attachment
+    ) -> str | None:
+        """添付をテキストとして読む（HTML はプレーン化）。"""
+        max_chars = self.bot.config.support.max_file_chars
+        try:
+            raw = await att.read()
+        except (aiohttp.ClientError, discord.HTTPException):
+            return None
+        if b"\0" in raw[:8000]:
+            return None
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("cp932", errors="replace")
+        name = (att.filename or "").lower()
+        if name.endswith((".html", ".htm")):
+            text = html_to_text(text)
+        return text[:max_chars]
 
     def _forum_name(self, thread: discord.Thread) -> str:
         """親フォーラムの表示名を返す。"""

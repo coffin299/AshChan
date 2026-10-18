@@ -27,6 +27,10 @@ ProgressCallback = Callable[[str, int, int], Awaitable[None] | None]
 GITHUB_API = "https://api.github.com"
 RAW_BASE = "https://raw.githubusercontent.com"
 HELP_PATH_PREFIX = "__help__/"
+MANUAL_PATH_PREFIX = "__manual__/"
+SUPPORT_PATH_PREFIX = "__support__/"
+# rebuild 時も残す（Discord 手動取り込み・過去サポート）
+PRESERVED_PREFIXES = (MANUAL_PATH_PREFIX, SUPPORT_PATH_PREFIX)
 
 
 class RagJobCancelled(Exception):
@@ -85,9 +89,12 @@ class RagIndexer:
         force: bool = False,
         on_progress: ProgressCallback | None = None,
     ) -> int:
-        """全文インデックス。force で既存チャンクを消して作り直す。"""
+        """全文インデックス。force で既存チャンクを消して作り直す。
+
+        手動取り込み（``__manual__/``）と過去サポート（``__support__/``）は残す。
+        """
         if force:
-            await self.store.clear_all()
+            await self.store.clear_except_prefixes(list(PRESERVED_PREFIXES))
         root = self._local_root(repo_path)
         if root is not None:
             chunk_total = await self._bootstrap_local(root, tag, on_progress)
@@ -223,6 +230,47 @@ class RagIndexer:
             return 0
         path = f"__release__/{tag}.md"
         return await self._index_text(path, body, tag)
+
+    async def index_manual_document(
+        self,
+        *,
+        message_id: int,
+        filename: str,
+        text: str,
+    ) -> int:
+        """Discord 添付など手動ドキュメントをインデックスする。"""
+        if not text.strip():
+            return 0
+        safe = (
+            filename.replace("\\", "_")
+            .replace("/", "_")
+            .replace("\0", "")
+            .strip()
+            or "document.txt"
+        )
+        path = f"{MANUAL_PATH_PREFIX}{message_id}/{safe}"
+        return await self._index_text(path, text, "manual")
+
+    async def index_support_history_thread(
+        self,
+        *,
+        thread_id: int,
+        title: str,
+        status: str,
+        body: str,
+    ) -> int:
+        """過去サポートスレの会話をインデックスする。"""
+        if not body.strip():
+            return 0
+        safe_title = (title or f"thread-{thread_id}").strip()
+        text = (
+            f"# Support: {safe_title}\n"
+            f"status: {status}\n"
+            f"thread_id: {thread_id}\n\n"
+            f"{body}"
+        )
+        path = f"{SUPPORT_PATH_PREFIX}{thread_id}.md"
+        return await self._index_text(path, text, "support-history")
 
     async def index_help_site(
         self,

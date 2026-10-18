@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 
 import discord
@@ -11,6 +12,12 @@ from discord.ext import commands
 from ash.bot import AshBot
 from ash.config import ConfigError
 from ash.notifier import COLOR_INFO, COLOR_SUCCESS, make_embed
+
+# Discord メッセージリンク → guild / channel / message
+_MESSAGE_LINK_RE = re.compile(
+    r"(?:https?://)?(?:(?:ptb|canary)\.)?discord(?:app)?\.com/channels/"
+    r"(\d+)/(\d+)/(\d+)"
+)
 
 
 def _on_off(value: bool) -> str:
@@ -24,6 +31,18 @@ def _format_uptime(seconds: float) -> str:
     hours, rem = divmod(rem, 3600)
     minutes, secs = divmod(rem, 60)
     return f"{days}日 {hours:02}:{minutes:02}:{secs:02}"
+
+
+def _parse_message_ref(value: str) -> tuple[int | None, int | None]:
+    """メッセージ ID またはリンクから (channel_id, message_id) を返す。"""
+    raw = value.strip()
+    match = _MESSAGE_LINK_RE.search(raw)
+    if match:
+        return int(match.group(2)), int(match.group(3))
+    digits = re.sub(r"[^\d]", "", raw)
+    if digits.isdigit() and len(digits) >= 17:
+        return None, int(digits)
+    return None, None
 
 
 class AdminCog(commands.Cog):
@@ -296,6 +315,151 @@ class AdminCog(commands.Cog):
         support.request_rag_cancel()  # type: ignore[attr-defined]
         await interaction.response.send_message(
             "キャンセル要求を出したよ。少し待つと止まるはず。", ephemeral=True
+        )
+
+    @rag.command(
+        name="ingest",
+        description="指定メッセージの添付ドキュメントを RAG に取り込みます",
+    )
+    @app_commands.describe(
+        message="メッセージ ID、またはメッセージリンク",
+        channel="メッセージがあるチャンネル（省略時はこのチャンネル／リンク内）",
+    )
+    async def rag_ingest(
+        self,
+        interaction: discord.Interaction,
+        message: str,
+        channel: discord.TextChannel | None = None,
+    ) -> None:
+        """Discord に投げた txt/md 等を手動でインデックスする。"""
+        await interaction.response.defer(ephemeral=True)
+        support = self._support_cog()
+        if support is None:
+            await interaction.followup.send("SupportCog が無いよ。", ephemeral=True)
+            return
+
+        link_channel_id, message_id = _parse_message_ref(message)
+        if message_id is None:
+            await interaction.followup.send(
+                "メッセージ ID（またはメッセージリンク）を認識できなかったよ。",
+                ephemeral=True,
+            )
+            return
+
+        target_channel: discord.abc.Messageable | None = channel
+        if target_channel is None and link_channel_id is not None:
+            fetched = interaction.guild.get_channel(link_channel_id) if interaction.guild else None
+            if fetched is None:
+                try:
+                    fetched = await self.bot.fetch_channel(link_channel_id)
+                except discord.HTTPException:
+                    fetched = None
+            if isinstance(fetched, (discord.TextChannel, discord.Thread)):
+                target_channel = fetched
+        if target_channel is None:
+            if isinstance(
+                interaction.channel, (discord.TextChannel, discord.Thread)
+            ):
+                target_channel = interaction.channel
+        if target_channel is None:
+            await interaction.followup.send(
+                "チャンネルが特定できないよ。channel を指定するか、"
+                "メッセージリンクを貼ってね。",
+                ephemeral=True,
+            )
+            return
+
+        result = await support.ingest_message_documents(  # type: ignore[attr-defined]
+            channel=target_channel,
+            message_id=message_id,
+        )
+        if not result.get("ok"):
+            err = str(result.get("error") or "unknown")
+            if err == "already_running":
+                msg = "いま別の RAG ジョブが走ってるよ。終わってからもう一回。"
+            elif err == "message_not_found":
+                msg = "そのメッセージが見つからなかったよ（チャンネル合ってる？）。"
+            elif err == "no_documents":
+                hint = result.get("hint") or ""
+                msg = f"取り込み可能な添付が無かったよ。{hint}"
+            else:
+                msg = f"取り込み失敗: {err}"
+            await interaction.followup.send(msg, ephemeral=True)
+            return
+
+        files = result.get("files") or []
+        skipped = result.get("skipped") or []
+        lines = [
+            f"取り込んだよ。chunks={result.get('chunks', 0)}",
+            "files: " + (", ".join(files) if files else "-"),
+        ]
+        if skipped:
+            lines.append("skipped: " + ", ".join(skipped))
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
+        await self.bot.notifier.notify_dev(
+            make_embed(
+                "RAG ingest",
+                f"{interaction.user} が message `{message_id}` を取り込みました。",
+                COLOR_INFO,
+                {
+                    "chunks": str(result.get("chunks") or 0),
+                    "files": ", ".join(files)[:200] or "-",
+                },
+            )
+        )
+
+    @rag.command(
+        name="history",
+        description="過去のサポートスレを RAG に取り込みます（解決済み含む）",
+    )
+    @app_commands.describe(
+        limit="取り込む最大スレ数（0=制限なし）",
+        include_archived="アーカイブ済みスレも含める",
+    )
+    async def rag_history(
+        self,
+        interaction: discord.Interaction,
+        limit: app_commands.Range[int, 0, 5000] = 0,
+        include_archived: bool = True,
+    ) -> None:
+        """フォーラムの過去スレ会話をバックグラウンドでインデックスする。"""
+        await interaction.response.defer(ephemeral=True)
+        support = self._support_cog()
+        if support is None:
+            await interaction.followup.send("SupportCog が無いよ。", ephemeral=True)
+            return
+        forums = self.bot.config.support.forum_channel_ids
+        if not forums:
+            await interaction.followup.send(
+                "`support.forum_channel_ids` が空だよ。",
+                ephemeral=True,
+            )
+            return
+        result = await support.start_rag_job(  # type: ignore[attr-defined]
+            "history",
+            history_limit=int(limit),
+            include_archived=include_archived,
+        )
+        if result == "already_running":
+            await interaction.followup.send(
+                "いま別の RAG ジョブが走ってるよ。/ash rag cancel で止められる。",
+                ephemeral=True,
+            )
+            return
+        arch = "含む" if include_archived else "含めない"
+        lim = "制限なし" if limit == 0 else str(limit)
+        await interaction.followup.send(
+            f"過去サポートの取り込みを始めたよ（limit={lim}, アーカイブ={arch}）。"
+            "完了は dev 通知。",
+            ephemeral=True,
+        )
+        await self.bot.notifier.notify_dev(
+            make_embed(
+                "RAG history 開始",
+                f"{interaction.user} が過去サポートのインデックスを開始しました。",
+                COLOR_INFO,
+                {"limit": lim, "archived": arch},
+            )
         )
 
 

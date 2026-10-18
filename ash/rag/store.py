@@ -104,6 +104,21 @@ class RagStore:
         await self.conn.execute("DELETE FROM rag_chunks")
         await self.conn.commit()
 
+    async def clear_except_prefixes(self, prefixes: list[str]) -> int:
+        """指定接頭辞以外のチャンクを削除する（手動取り込み等を残す）。"""
+        kept = [p for p in prefixes if p]
+        if not kept:
+            await self.clear_all()
+            return 0
+        clause = " AND ".join("path NOT LIKE ?" for _ in kept)
+        params = tuple(f"{p}%" for p in kept)
+        cursor = await self.conn.execute(
+            f"DELETE FROM rag_chunks WHERE {clause}",
+            params,
+        )
+        await self.conn.commit()
+        return int(cursor.rowcount or 0)
+
     async def delete_path(self, path: str) -> None:
         await self.conn.execute("DELETE FROM rag_chunks WHERE path = ?", (path,))
         await self.conn.commit()

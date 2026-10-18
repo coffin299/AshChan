@@ -255,6 +255,7 @@ class PresenceConfig:
     chat_busy: str = "会話中"
     rag_rebuild: str = "RAG再構築中"
     rag_sync: str = "RAG更新中"
+    rag_history: str = "過去サポート取込中"
 
 
 @dataclass
