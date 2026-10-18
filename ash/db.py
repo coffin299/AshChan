@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS chat_history (
 );
 CREATE INDEX IF NOT EXISTS idx_history_channel
     ON chat_history (channel_id, id);
+CREATE TABLE IF NOT EXISTS support_threads (
+    thread_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'open',
+    owner_id INTEGER NOT NULL DEFAULT 0,
+    last_action_message_id INTEGER NOT NULL DEFAULT 0,
+    turn_count INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL
+);
 """
 
 
@@ -221,3 +229,84 @@ class Database:
             (channel_id, channel_id, max(keep, 0)),
         )
         await self.conn.commit()
+
+    # ------------------------------------------------------------
+    # サポートフォーラムスレ状態
+    # ------------------------------------------------------------
+    async def ensure_support_thread(
+        self, thread_id: int, owner_id: int
+    ) -> dict[str, int | str]:
+        """スレ行が無ければ open で作成し、現在の状態を返す。"""
+        now = time.time()
+        await self.conn.execute(
+            """
+            INSERT OR IGNORE INTO support_threads
+                (thread_id, status, owner_id, last_action_message_id,
+                 turn_count, updated_at)
+            VALUES (?, 'open', ?, 0, 0, ?)
+            """,
+            (thread_id, owner_id, now),
+        )
+        await self.conn.commit()
+        return await self.get_support_thread(thread_id)
+
+    async def get_support_thread(
+        self, thread_id: int
+    ) -> dict[str, int | str]:
+        """サポートスレ状態を返す（無ければ空 dict）。"""
+        async with self.conn.execute(
+            """
+            SELECT status, owner_id, last_action_message_id, turn_count
+            FROM support_threads WHERE thread_id = ?
+            """,
+            (thread_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return {}
+        return {
+            "status": str(row[0]),
+            "owner_id": int(row[1]),
+            "last_action_message_id": int(row[2]),
+            "turn_count": int(row[3]),
+        }
+
+    async def set_support_status(self, thread_id: int, status: str) -> None:
+        """スレ状態を更新する。"""
+        await self.conn.execute(
+            """
+            UPDATE support_threads
+            SET status = ?, updated_at = ?
+            WHERE thread_id = ?
+            """,
+            (status, time.time(), thread_id),
+        )
+        await self.conn.commit()
+
+    async def set_support_action_message(
+        self, thread_id: int, message_id: int
+    ) -> None:
+        """最新のボタン付きメッセージ ID を保存する。"""
+        await self.conn.execute(
+            """
+            UPDATE support_threads
+            SET last_action_message_id = ?, updated_at = ?
+            WHERE thread_id = ?
+            """,
+            (message_id, time.time(), thread_id),
+        )
+        await self.conn.commit()
+
+    async def bump_support_turn(self, thread_id: int) -> int:
+        """往復数を1増やして返す。"""
+        await self.conn.execute(
+            """
+            UPDATE support_threads
+            SET turn_count = turn_count + 1, updated_at = ?
+            WHERE thread_id = ?
+            """,
+            (time.time(), thread_id),
+        )
+        await self.conn.commit()
+        state = await self.get_support_thread(thread_id)
+        return int(state.get("turn_count") or 0)

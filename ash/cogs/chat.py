@@ -143,6 +143,10 @@ class ChatCog(commands.Cog):
         # ハニーポットチャンネルでは会話しない
         if message.channel.id in self.bot.config.honeypot.channel_ids:
             return
+        # サポートフォーラムのスレは SupportCog が担当する
+        support = self.bot.get_cog("SupportCog")
+        if support is not None and support.is_support_thread(message.channel):  # type: ignore[attr-defined]
+            return
         # トリガー条件を満たさなければ無視する
         if not self._is_triggered(message):
             return
@@ -171,25 +175,33 @@ class ChatCog(commands.Cog):
         sources: list[str] = []
         failed = False
 
-        # 生成中は「入力中...」を表示する
-        async with message.channel.typing():
-            try:
-                await self._generate(messages, view, sources)
-            except LLMError:
-                # エラーは dev 通知せず、定型文で返す
-                failed = True
+        self.bot.presence.begin_chat()
+        await self.bot.presence.bump()
+        try:
+            # 生成中は「入力中...」を表示する
+            async with message.channel.typing():
+                try:
+                    await self._generate(messages, view, sources)
+                except LLMError:
+                    # エラーは dev 通知せず、定型文で返す
+                    failed = True
 
-        # 失敗時・空応答時は定型文で締める
-        if failed or not view.has_output:
-            suffix = ("\n\n" if view.has_output else "") + self._fallback()
-            await view.finalize(suffix)
-            return
-        # 参照リンクを小さく付記して確定する
-        await view.finalize(self._sources_suffix(sources))
-        # 成功した会話だけを履歴に保存する
-        await self.bot.db.add_history(channel_id, "user", user_turn)
-        await self.bot.db.add_history(channel_id, "assistant", view.full_text.strip())
-        await self.bot.db.trim_history(channel_id, cfg.llm.history_turns * 2)
+            # 失敗時・空応答時は定型文で締める
+            if failed or not view.has_output:
+                suffix = ("\n\n" if view.has_output else "") + self._fallback()
+                await view.finalize(suffix)
+                return
+            # 参照リンクを小さく付記して確定する
+            await view.finalize(self._sources_suffix(sources))
+            # 成功した会話だけを履歴に保存する
+            await self.bot.db.add_history(channel_id, "user", user_turn)
+            await self.bot.db.add_history(
+                channel_id, "assistant", view.full_text.strip()
+            )
+            await self.bot.db.trim_history(channel_id, cfg.llm.history_turns * 2)
+        finally:
+            self.bot.presence.end_chat()
+            await self.bot.presence.bump()
 
     async def _generate(
         self,

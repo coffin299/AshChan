@@ -146,16 +146,42 @@ github:
 - 同じ配信の再送は無視
 - 外部から届く必要があるので、Cloudflare Tunnel / ngrok 等のトンネルかポート開放が必要（[setup.md](setup.md) 参照）
 
+## Discord ステータス（いま何してるか）
+
+- `presence.enabled` で ON/OFF（既定 ON）
+- カスタムステータスに短文を出し、`presence.rotate_sec` ごとにローテ
+- 優先度: RAG ジョブ → サポート中（`サポート中/{フォーラム名}`、複数なら順に）→ 会話中 → 待機文言
+- 待機文言は `presence.idle_statuses`（例: 通常待機 / 暇だよ）
+
+## VRCast サポートフォーラム（RAG）
+
+- `support.enabled` と `support.forum_channel_ids` で対象フォーラムを指定
+- **新規スレ作成時**: メンションなしで自動応答（軽い自己紹介 + 情報要求）
+- **以降**: ボット発言へのリプライのみ応答（通常の ChatCog は対象スレを無視）
+- 応答中はトークンストリームではなく「いま何してるか」のステータス表示
+- 完了後は Components V2: 本文 + `footer_hint` + 「解決した」「開発者に聞く」（**最新メッセージのみ**）
+- `.txt` / `.log` 添付を読み取り、プロンプトに注入
+- LLM / RAG 失敗時は 30 秒間隔で最大 3 回再試行。だめなら管理者メンション + 失敗 V2（ボタン無効）+ スレ `failed`
+- 「開発者に聞く」時は会話履歴と `.txt`/`.log` から **開発者向け引き継ぎメモ**（症状・環境・再現・ログ要点・未解決点など）を LLM で生成してメンション付き投稿
+- ナレッジ: `coffin299/VRCast` の docs + ソース（`include_globs` / `exclude_globs`）
+- 初回: `bootstrap_rag.bat`（LM Studio）または `python -m ash.rag bootstrap`
+- 本番揃え: `/ash rag rebuild-nim`（NIM 全文再構築、40RPM）
+- リリース Webhook: 対象 repo の published で差分 sync
+
 ## 管理コマンド
 
 すべて管理者権限が必要で、結果は本人にだけ表示されます。
 
 | コマンド | 内容 |
 | --- | --- |
-| `/ash status` | 稼働時間・レイテンシ・LLM 疎通・各機能の ON/OFF・GitHub Webhook の待受状態 |
+| `/ash status` | 稼働時間・レイテンシ・LLM 疎通・各機能の ON/OFF・GitHub Webhook・サポート RAG |
 | `/ash reload` | `config.yaml` と `prompt.md` を再読込し、AutoMod 再同期と GitHub Webhook サーバーの再起動 |
 | `/ash honeypot count <user>` | ハニーポット検知回数を表示 |
 | `/ash honeypot reset <user>` | ハニーポット検知回数を 0 に戻す |
+| `/ash rag status` | RAG のタグ・チャンク数・埋め込みモデル |
+| `/ash rag sync [tag]` | 最新（または指定）リリースまで差分更新 |
+| `/ash rag rebuild-nim [tag]` | NIM で全文作り直し（初回ローカル後の本番用） |
+| `/ash rag cancel` | 実行中の RAG ジョブをキャンセル |
 
 ## 通知先
 

@@ -192,6 +192,53 @@ class FixLinkConfig:
 
 
 @dataclass
+class SupportConfig:
+    """VRCast サポートフォーラム / RAG 設定。"""
+
+    enabled: bool = False
+    forum_channel_ids: list[int] = field(default_factory=list)
+    admin_user_ids: list[int] = field(default_factory=list)
+    resolved_tag_name: str = "解決済み"
+    repo: str = "coffin299/VRCast"
+    local_repo_path: str = ""
+    include_globs: list[str] = field(default_factory=list)
+    exclude_globs: list[str] = field(default_factory=list)
+    embedding_model: str = "nvidia/nv-embedqa-e5-v5"
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
+    top_k: int = 8
+    chunk_size: int = 1200
+    chunk_overlap: int = 150
+    embed_batch_size: int = 8
+    embed_rpm: int = 40
+    max_file_chars: int = 200_000
+    max_attachment_chars: int = 20_000
+    prompt_file: str = "prompt_support.md"
+    max_turns_before_hint: int = 6
+    footer_hint: str = (
+        "アッシュちゃんはコードベースから解決策を考えます。"
+        "リプライで会話を続けるか、下記ボタンから開発者にエスカレーションしてください。"
+    )
+    llm_retry_count: int = 3
+    llm_retry_delay_sec: float = 30.0
+    resolve_button_label: str = "解決した"
+    escalate_button_label: str = "開発者に聞く"
+
+
+@dataclass
+class PresenceConfig:
+    """Discord カスタムステータス（いま何してるか）設定。"""
+
+    enabled: bool = True
+    rotate_sec: float = 20.0
+    idle_statuses: list[str] = field(default_factory=list)
+    support_template: str = "サポート中/{forum}"
+    chat_busy: str = "会話中"
+    rag_rebuild: str = "RAG再構築中"
+    rag_sync: str = "RAG更新中"
+
+
+@dataclass
 class Config:
     """ボット全体の設定。"""
 
@@ -206,6 +253,8 @@ class Config:
     autorole: AutoRoleConfig
     welcome: WelcomeConfig
     github: GitHubConfig
+    support: SupportConfig
+    presence: PresenceConfig
     path: Path
 
     def resolve_path(self, relative: str) -> Path:
@@ -266,6 +315,8 @@ def load_config(path: Path | None = None) -> Config:
     welcome_cfg = _build(WelcomeConfig, raw.get("welcome"))
     github_raw = raw.get("github") or {}
     github_cfg = _build(GitHubConfig, github_raw)
+    support_cfg = _build(SupportConfig, raw.get("support"))
+    presence_cfg = _build(PresenceConfig, raw.get("presence"))
 
     # ネストした AutoMod 設定を dataclass 化する
     moderation_cfg.automod = _build(AutomodConfig, moderation_raw.get("automod"))
@@ -323,11 +374,65 @@ def load_config(path: Path | None = None) -> Config:
     antinuke_cfg.thresholds = {
         str(k): int(v) for k, v in (antinuke_cfg.thresholds or {}).items()
     }
+    # サポート / RAG の ID・グロブを正規化する
+    support_cfg.forum_channel_ids = _int_list(support_cfg.forum_channel_ids)
+    support_cfg.admin_user_ids = _int_list(support_cfg.admin_user_ids)
+    if not support_cfg.include_globs:
+        support_cfg.include_globs = [
+            "**/*.cs",
+            "**/*.md",
+            "**/*.txt",
+            "**/*.json",
+            "**/*.xml",
+            "**/*.uxml",
+            "**/*.uss",
+            "**/*.shader",
+            "**/*.hlsl",
+            "**/*.compute",
+            "**/*.asmdef",
+        ]
+    else:
+        support_cfg.include_globs = [str(g) for g in support_cfg.include_globs]
+    if not support_cfg.exclude_globs:
+        support_cfg.exclude_globs = [
+            "**/Library/**",
+            "**/obj/**",
+            "**/bin/**",
+            "**/.git/**",
+            "**/docs/images/**",
+            "**/*.meta",
+        ]
+    else:
+        support_cfg.exclude_globs = [str(g) for g in support_cfg.exclude_globs]
 
     # 環境変数があれば秘密情報を上書きする
     discord_cfg.token = os.environ.get(ENV_DISCORD_TOKEN) or discord_cfg.token
     llm_cfg.api_key = os.environ.get(ENV_NVIDIA_API_KEY) or llm_cfg.api_key
     github_cfg.secret = os.environ.get(ENV_GITHUB_SECRET) or github_cfg.secret
+    support_cfg.embedding_api_key = (
+        os.environ.get("RAG_API_KEY")
+        or support_cfg.embedding_api_key
+        or llm_cfg.api_key
+    )
+    if os.environ.get("RAG_BASE_URL"):
+        support_cfg.embedding_base_url = os.environ["RAG_BASE_URL"]
+    if os.environ.get("RAG_EMBED_MODEL"):
+        support_cfg.embedding_model = os.environ["RAG_EMBED_MODEL"]
+    if not support_cfg.embedding_base_url:
+        support_cfg.embedding_base_url = llm_cfg.base_url
+
+    # プレゼンスの待機文言（空なら既定セット）
+    if not presence_cfg.idle_statuses:
+        presence_cfg.idle_statuses = [
+            "通常待機",
+            "暇だよ",
+            "VRCastのdocs眺めてる",
+            "ねむい…",
+        ]
+    else:
+        presence_cfg.idle_statuses = [
+            str(s).strip() for s in presence_cfg.idle_statuses if str(s).strip()
+        ]
 
     # Discord トークンは必須
     if not discord_cfg.token:
@@ -347,5 +452,7 @@ def load_config(path: Path | None = None) -> Config:
         autorole=autorole_cfg,
         welcome=welcome_cfg,
         github=github_cfg,
+        support=support_cfg,
+        presence=presence_cfg,
         path=config_path,
     )

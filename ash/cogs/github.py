@@ -231,6 +231,9 @@ class GitHubCog(commands.Cog):
                      event, payload.get("action"))
             return
         await self._send(notification)
+        # VRCast リリース公開時はサポート RAG を差分更新する
+        if event == "release" and payload.get("action") == "published":
+            await self._maybe_sync_rag(payload)
 
     # ------------------------------------------------------------
     # 埋め込み生成
@@ -421,6 +424,22 @@ class GitHubCog(commands.Cog):
                 return route.channel_id
         # どのルートにも当たらなければ Issue 用 → 既定チャンネルの順
         return cfg.issue_channel_id or cfg.default_channel_id
+
+    async def _maybe_sync_rag(self, payload: dict[str, Any]) -> None:
+        """サポート対象リポジトリのリリースなら RAG 差分同期をキックする。"""
+        support = self.bot.get_cog("SupportCog")
+        if support is None:
+            return
+        repo = str((payload.get("repository") or {}).get("full_name", ""))
+        release = payload.get("release") or {}
+        tag = str(release.get("tag_name") or "")
+        body = str(release.get("body") or "")
+        if not tag:
+            return
+        try:
+            await support.on_release_published(repo, tag, body)  # type: ignore[attr-defined]
+        except Exception:
+            log.exception("GitHub: RAG sync kick failed")
 
     async def _send(self, notification: Notification) -> None:
         """振り分け先のチャンネルへ送信する。"""

@@ -40,6 +40,10 @@ class AdminCog(commands.Cog):
     honeypot = app_commands.Group(
         name="honeypot", description="ハニーポット回数の管理", parent=ash
     )
+    # /ash rag サブグループ
+    rag = app_commands.Group(
+        name="rag", description="VRCast サポート RAG の管理", parent=ash
+    )
 
     def __init__(self, bot: AshBot) -> None:
         # Bot 参照を保持する
@@ -85,6 +89,11 @@ class AdminCog(commands.Cog):
                 ),
                 "ようこそメッセージ": _on_off(cfg.welcome.enabled),
                 "GitHub通知": self._github_status(),
+                "サポートRAG": (
+                    f"{_on_off(cfg.support.enabled)}"
+                    f"（forum {len(cfg.support.forum_channel_ids)}）"
+                ),
+                "ステータス表示": _on_off(cfg.presence.enabled),
             },
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -153,6 +162,128 @@ class AdminCog(commands.Cog):
                 f"{interaction.user} が {user} (`{user.id}`) の回数をリセットしました。",
                 COLOR_INFO,
             )
+        )
+
+    def _support_cog(self):
+        return self.bot.get_cog("SupportCog")
+
+    @rag.command(name="status", description="RAG インデックスの状態を表示します")
+    async def rag_status(self, interaction: discord.Interaction) -> None:
+        """チャンク数・タグ・埋め込みモデルを表示する。"""
+        await interaction.response.defer(ephemeral=True)
+        support = self._support_cog()
+        if support is None:
+            await interaction.followup.send("SupportCog が無いよ。", ephemeral=True)
+            return
+        status = await support.rag_status()  # type: ignore[attr-defined]
+        indexed = float(status.get("indexed_at") or 0)
+        when = (
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(indexed))
+            if indexed
+            else "-"
+        )
+        busy = "実行中" if support.rag_busy else "idle"  # type: ignore[attr-defined]
+        embed = make_embed(
+            "RAG 状態",
+            "",
+            COLOR_INFO,
+            {
+                "current_tag": str(status.get("current_tag") or "-"),
+                "embed_model": str(status.get("embed_model") or "-"),
+                "chunks": str(status.get("chunk_count") or 0),
+                "indexed_at": when,
+                "job": busy,
+                "repo": self.bot.config.support.repo,
+            },
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @rag.command(
+        name="sync",
+        description="最新リリースまで RAG を差分更新します（NIM）",
+    )
+    @app_commands.describe(tag="省略時は GitHub の最新リリース")
+    async def rag_sync(
+        self, interaction: discord.Interaction, tag: str = ""
+    ) -> None:
+        """差分同期ジョブを開始する。"""
+        await interaction.response.defer(ephemeral=True)
+        support = self._support_cog()
+        if support is None:
+            await interaction.followup.send("SupportCog が無いよ。", ephemeral=True)
+            return
+        result = await support.start_rag_job(  # type: ignore[attr-defined]
+            "sync", to_tag=tag.strip() or None
+        )
+        if result == "already_running":
+            await interaction.followup.send(
+                "いま別の RAG ジョブが走ってるよ。/ash rag cancel で止められる。",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(
+            "差分 sync をバックグラウンドで始めたよ。終わったら dev に通知する。",
+            ephemeral=True,
+        )
+
+    @rag.command(
+        name="rebuild-nim",
+        description="NIM で RAG を全文作り直します（初回ローカル後の本番用）",
+    )
+    @app_commands.describe(tag="省略時は GitHub の最新リリース")
+    async def rag_rebuild_nim(
+        self, interaction: discord.Interaction, tag: str = ""
+    ) -> None:
+        """NIM フル再インデックスを開始する。"""
+        await interaction.response.defer(ephemeral=True)
+        support = self._support_cog()
+        if support is None:
+            await interaction.followup.send("SupportCog が無いよ。", ephemeral=True)
+            return
+        if not self.bot.config.support.local_repo_path:
+            await interaction.followup.send(
+                "support.local_repo_path が空だよ。ローカル VRCast パスを設定してね。",
+                ephemeral=True,
+            )
+            return
+        result = await support.start_rag_job(  # type: ignore[attr-defined]
+            "rebuild-nim", force_nim=True, to_tag=tag.strip() or None
+        )
+        if result == "already_running":
+            await interaction.followup.send(
+                "いま別の RAG ジョブが走ってるよ。",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(
+            "NIM 全文 rebuild を始めたよ。40RPM なのでしばらくかかる。完了は dev 通知。",
+            ephemeral=True,
+        )
+        await self.bot.notifier.notify_dev(
+            make_embed(
+                "RAG rebuild-nim 開始",
+                f"{interaction.user} が全文再インデックスを開始しました。",
+                COLOR_INFO,
+            )
+        )
+
+    @rag.command(name="cancel", description="実行中の RAG ジョブをキャンセルします")
+    async def rag_cancel(self, interaction: discord.Interaction) -> None:
+        """実行中ジョブにキャンセルを要求する。"""
+        support = self._support_cog()
+        if support is None:
+            await interaction.response.send_message(
+                "SupportCog が無いよ。", ephemeral=True
+            )
+            return
+        if not support.rag_busy:  # type: ignore[attr-defined]
+            await interaction.response.send_message(
+                "動いてるジョブは無いみたい。", ephemeral=True
+            )
+            return
+        support.request_rag_cancel()  # type: ignore[attr-defined]
+        await interaction.response.send_message(
+            "キャンセル要求を出したよ。少し待つと止まるはず。", ephemeral=True
         )
 
 

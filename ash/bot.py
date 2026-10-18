@@ -16,6 +16,7 @@ from ash.config import BASE_DIR, Config, load_config
 from ash.db import Database
 from ash.llm.client import LLMClient
 from ash.notifier import COLOR_DANGER, COLOR_INFO, Notifier, make_embed
+from ash.presence import PresenceManager
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ COG_EXTENSIONS = (
     "ash.cogs.autorole",
     "ash.cogs.welcome",
     "ash.cogs.github",
+    "ash.cogs.support",
     "ash.cogs.chat",
     "ash.cogs.admin",
 )
@@ -62,6 +64,7 @@ class AshBot(commands.Bot):
         self.db = Database(DB_PATH)
         self.notifier = Notifier(self)
         self.llm = LLMClient(config.llm)
+        self.presence = PresenceManager(self)
         # システムプロンプトを読み込む
         self.system_prompt = self._read_prompt()
         # 起動時刻（/ash status 用）
@@ -89,6 +92,8 @@ class AshBot(commands.Bot):
         self.llm = LLMClient(self.config.llm)
         # プロンプトを読み直す
         self.system_prompt = self._read_prompt()
+        # プレゼンス設定が変わったらすぐ反映する
+        await self.presence.bump()
 
     async def setup_hook(self) -> None:
         """ログイン後・接続前の初期化処理。"""
@@ -121,6 +126,9 @@ class AshBot(commands.Bot):
             return
         self._ready_notified = True
         log.info("Logged in as %s (%s)", self.user, getattr(self.user, "id", "-"))
+        # カスタムステータスのローテーションを開始する
+        self.presence.start()
+        await self.presence.bump()
         # 起動を dev 通知する
         await self.notifier.notify_dev(
             make_embed(
@@ -139,6 +147,7 @@ class AshBot(commands.Bot):
                 make_embed("アッシュ停止", "ボットを停止します。", COLOR_INFO)
             )
         # 依存リソースを閉じる
+        await self.presence.stop()
         await self.llm.close()
         await self.db.close()
         await super().close()

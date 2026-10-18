@@ -17,7 +17,8 @@ VRChat の ASH ちゃん風キャラクター「アッシュ」が住む Discord
 | ようこそメッセージ | 新規参加者へアッシュの口調で 1〜3 行の挨拶を LLM で生成し、着地チャンネルへ送信 |
 | 自動ロール | 新規参加者に指定ロールを自動付与（メンバーシップ審査の通過待ちにも対応） |
 | GitHub 通知 | GitHub Webhook を受信し、Issue / PR のコメント・状態変化、リリース、コミットを通知。Issue 番号ごと・リリース用・コミット用に送信先チャンネルを指定可能（署名検証あり） |
-| 管理コマンド | `/ash status` `/ash reload` `/ash honeypot count` `/ash honeypot reset` |
+| VRCast サポート RAG | 指定フォーラムの新規スレに自動応答。リプライで継続。コードベース RAG + Components V2（解決／開発者エスカレーション）。初回は `bootstrap_rag.bat`（LM Studio）、本番は `/ash rag rebuild-nim` |
+| 管理コマンド | `/ash status` `/ash reload` `/ash honeypot …` `/ash rag status|sync|rebuild-nim|cancel` |
 
 詳細は [docs/features.md](docs/features.md) を参照してください。
 
@@ -47,7 +48,10 @@ AshChan/
 │   ├── notifier.py        # dev 通知 / 緊急DM
 │   ├── utils.py
 │   ├── llm/               # NIM クライアント・DDG 検索・ストリーミング表示
-│   └── cogs/              # chat / moderation / antinuke / honeypot / fixlink / autorole / welcome / github / admin
+│   ├── rag/               # VRCast RAG（bootstrap / diff / retrieve）
+│   └── cogs/              # chat / support / moderation / … / github / admin
+├── bootstrap_rag.bat      # LM Studio 向け初回 RAG（英語メッセージ）
+├── prompt_support.md      # サポートモード追加プロンプト
 ├── data/                  # 実行時データ（Git 管理外）
 ├── logs/                  # ログ（Git 管理外）
 └── docs/                  # ドキュメント
