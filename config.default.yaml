@@ -642,9 +642,18 @@ support:
   # 型: 文字列 / 既定: "coffin299/VRCast"
   repo: "coffin299/VRCast"
 
-  # ローカルクローンのパス（bootstrap / rebuild 用）。空なら GitHub API。
+  # ローカルクローンのパス（bootstrap / rebuild 用）。
+  # 空なら support.repo を GitHub（API + raw.githubusercontent.com）から取得。
   # 型: 文字列 / 既定: ""
   local_repo_path: ""
+
+  # GitHub API 用トークン（remote 取得・差分 sync のレート制限緩和）。
+  # classic PAT または fine-grained（Contents: Read）で OK。
+  # ※ 絶対に公開・コミットしないでください（config.yaml は .gitignore 済み）
+  # ※ 環境変数 GITHUB_TOKEN / GH_TOKEN があればそちらが優先されます
+  # ※ github.secret（Webhook 署名）とは別物です
+  # 型: 文字列 / 既定: ""
+  github_token: ""
 
   # インデックス対象の glob（空ならコード既定）。
   # 型: 文字列のリスト

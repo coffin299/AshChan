@@ -17,6 +17,8 @@ DEFAULT_CONFIG_PATH = BASE_DIR / "config.yaml"
 ENV_DISCORD_TOKEN = "ASH_DISCORD_TOKEN"
 ENV_NVIDIA_API_KEY = "NVIDIA_API_KEY"
 ENV_GITHUB_SECRET = "GITHUB_WEBHOOK_SECRET"
+ENV_GITHUB_TOKEN = "GITHUB_TOKEN"
+ENV_GH_TOKEN = "GH_TOKEN"
 
 T = TypeVar("T")
 
@@ -213,6 +215,8 @@ class SupportConfig:
     resolved_tag_name: str = "解決済み"
     repo: str = "coffin299/VRCast"
     local_repo_path: str = ""
+    # RAG の GitHub API 用（remote bootstrap / sync）。Webhook secret とは別
+    github_token: str = ""
     include_globs: list[str] = field(default_factory=list)
     exclude_globs: list[str] = field(default_factory=list)
     embedding_model: str = "nvidia/nemotron-3-embed-1b"
@@ -433,6 +437,13 @@ def load_config(path: Path | None = None) -> Config:
     discord_cfg.token = os.environ.get(ENV_DISCORD_TOKEN) or discord_cfg.token
     llm_cfg.api_key = os.environ.get(ENV_NVIDIA_API_KEY) or llm_cfg.api_key
     github_cfg.secret = os.environ.get(ENV_GITHUB_SECRET) or github_cfg.secret
+    # RAG 用 GitHub トークン（環境変数が最優先）
+    support_cfg.github_token = (
+        os.environ.get(ENV_GITHUB_TOKEN)
+        or os.environ.get(ENV_GH_TOKEN)
+        or support_cfg.github_token
+        or ""
+    )
     support_cfg.embedding_api_key = (
         os.environ.get("RAG_API_KEY")
         or support_cfg.embedding_api_key

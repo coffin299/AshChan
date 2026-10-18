@@ -67,12 +67,12 @@ winget install Python.Python.3.11
 | `support.enabled` | `true` |
 | `support.forum_channel_ids` | フォーラムチャンネル ID |
 | `support.admin_user_ids` | 失敗時・エスカレーション先 |
-| `support.local_repo_path` | VRCast のローカルクローンパス（rebuild / bootstrap 用） |
+| `support.local_repo_path` | 任意。空なら GitHub リモートから取得（`support.repo`） |
 | `support.repo` | 既定 `coffin299/VRCast` |
+| `support.github_token` | GitHub API 用トークン（remote 取得の推奨）。`GITHUB_TOKEN` 環境変数でも可 |
 
-3. 初回インデックス（開発・検証）: LM Studio で embedding モデルをロードし `bootstrap_rag.bat` を実行（メッセージは英語）
-4. 本番用に NIM で揃える: `/ash rag rebuild-nim`（数十分かかることがある・40RPM）
-5. 以降は GitHub Releases Webhook または `/ash rag sync` で差分更新
+3. 初回インデックス: ローカルなら `bootstrap_rag.bat`（LM Studio）、本番は `/ash rag rebuild-nim`（パス空でも GitHub から取得可）
+4. 以降は GitHub Releases Webhook または `/ash rag sync` で差分更新
 
 ボットにはフォーラムでの「メッセージ送信」「スレッド管理」（タグ付与・アーカイブ）権限が必要です。
 

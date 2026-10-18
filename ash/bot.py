@@ -143,17 +143,28 @@ class AshBot(commands.Bot):
         )
 
     async def close(self) -> None:
-        """終了処理: 停止通知と DB クローズ。"""
+        """終了処理: 停止通知 → Discord 切断 → ローカル資源解放。"""
+        # バックグラウンドのプレゼンス更新を先に止める（切断後の WS 触りを防ぐ）
+        await self.presence.stop(clear_activity=False)
         # まだ接続中なら停止を通知する
         if self.is_ready() and not self.is_closed():
-            await self.notifier.notify_dev(
-                make_embed("アッシュ停止", "ボットを停止します。", COLOR_INFO)
-            )
-        # 依存リソースを閉じる
-        await self.presence.stop()
-        await self.llm.close()
-        await self.db.close()
+            try:
+                await self.notifier.notify_dev(
+                    make_embed("アッシュ停止", "ボットを停止します。", COLOR_INFO)
+                )
+            except Exception:
+                log.exception("停止通知に失敗しました")
+        # Discord を先に閉じ、keep-alive を正規に止める
         await super().close()
+        # 切断後にローカル資源を解放する
+        try:
+            await self.llm.close()
+        except Exception:
+            log.exception("LLM クライアントのクローズに失敗しました")
+        try:
+            await self.db.close()
+        except Exception:
+            log.exception("DB のクローズに失敗しました")
 
     async def on_error(self, event_method: str, /, *args: Any, **kwargs: Any) -> None:
         """イベント処理中の未捕捉例外を記録・通知する。"""

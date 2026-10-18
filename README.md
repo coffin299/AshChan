@@ -60,7 +60,8 @@ AshChan/
 ## セキュリティ
 
 - `config.yaml` にはトークンと API キーが入ります。コミット・共有しないでください（`.gitignore` 済み）。
-- 環境変数 `ASH_DISCORD_TOKEN` / `NVIDIA_API_KEY` / `GITHUB_WEBHOOK_SECRET` を設定すると、config.yaml の値より優先されます。
+- 環境変数 `ASH_DISCORD_TOKEN` / `NVIDIA_API_KEY` / `GITHUB_WEBHOOK_SECRET` / `GITHUB_TOKEN`（または `GH_TOKEN`）を設定すると、config.yaml の値より優先されます。
+- RAG 用 GitHub トークンは `support.github_token` にも書けます（Webhook の `github.secret` とは別）。
 - ハニーポットは BAN を伴うので、まずテストサーバーで動作を確認してください。
 
 ## ライセンス

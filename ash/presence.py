@@ -44,19 +44,25 @@ class PresenceManager:
             return
         self._task = asyncio.create_task(self._loop(), name="presence-rotate")
 
-    async def stop(self) -> None:
-        """ループを止めてステータスを消す。"""
+    async def stop(self, *, clear_activity: bool = True) -> None:
+        """ループを止める。必要ならステータスも消す。"""
         if self._task is not None:
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                log.debug("presence task stop error", exc_info=True)
             self._task = None
-        if self._bot.is_ready():
+        if (
+            clear_activity
+            and self._bot.is_ready()
+            and not self._bot.is_closed()
+        ):
             try:
                 await self._bot.change_presence(activity=None)
-            except discord.HTTPException:
+            except (discord.HTTPException, RuntimeError, asyncio.CancelledError):
                 pass
 
     def begin_support(self, thread_id: int, forum_name: str) -> None:
@@ -103,38 +109,45 @@ class PresenceManager:
 
     async def _loop(self) -> None:
         """一定間隔で候補をローテして presence を更新する。"""
-        await self._bot.wait_until_ready()
-        while not self._bot.is_closed():
-            cfg = self._cfg
-            if not cfg.enabled:
-                await asyncio.sleep(5.0)
-                continue
-            candidates = self._candidates()
-            if not candidates:
-                candidates = ["通常待機"]
-            text = candidates[self._index % len(candidates)]
-            self._index = (self._index + 1) % max(len(candidates), 1)
-            await self._apply(text)
-            interval = max(5.0, float(cfg.rotate_sec))
-            await asyncio.sleep(interval)
+        try:
+            await self._bot.wait_until_ready()
+            while not self._bot.is_closed():
+                cfg = self._cfg
+                if not cfg.enabled:
+                    await asyncio.sleep(5.0)
+                    continue
+                candidates = self._candidates()
+                if not candidates:
+                    candidates = ["通常待機"]
+                text = candidates[self._index % len(candidates)]
+                self._index = (self._index + 1) % max(len(candidates), 1)
+                await self._apply(text)
+                interval = max(5.0, float(cfg.rotate_sec))
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("presence loop crashed")
 
     async def _apply(self, text: str) -> None:
         """同じ文言の連続更新を避けて change_presence する。"""
         name = text.strip()[:_MAX_NAME]
         if not name or name == self._last_text:
             return
-        if not self._bot.is_ready():
+        if not self._bot.is_ready() or self._bot.is_closed():
             return
         try:
             await self._bot.change_presence(
                 activity=discord.CustomActivity(name=name)
             )
             self._last_text = name
-        except discord.HTTPException as exc:
-            log.warning("presence update failed: %s", exc)
+        except (discord.HTTPException, RuntimeError, asyncio.CancelledError) as exc:
+            log.debug("presence update skipped: %s", exc)
 
     async def bump(self) -> None:
         """状態変化直後にすぐ反映したいとき用。"""
+        if self._bot.is_closed():
+            return
         candidates = self._candidates()
         if candidates:
             self._index = 0

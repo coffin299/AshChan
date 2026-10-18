@@ -166,8 +166,8 @@ github:
 - 「開発者に聞く」時は会話履歴と `.txt`/`.log` から **開発者向け引き継ぎメモ**（症状・環境・再現・ログ要点・未解決点など）を LLM で生成してメンション付き投稿
 - ナレッジ: `coffin299/VRCast` の docs + ソース（`include_globs` / `exclude_globs`）
 - 初回: `bootstrap_rag.bat`（LM Studio）または `python -m ash.rag bootstrap`
-- 本番揃え: `/ash rag rebuild-nim`（NIM 全文再構築、40RPM）
-- リリース Webhook: 対象 repo の published で差分 sync
+- 本番揃え: `/ash rag rebuild-nim`（NIM 全文再構築、40RPM）。`local_repo_path` が空なら GitHub から取得
+- リリース Webhook: 対象 repo の published で差分 sync（ローカル無ければ Compare API）
 
 ## 管理コマンド
 

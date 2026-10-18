@@ -248,12 +248,11 @@ class AdminCog(commands.Cog):
         if support is None:
             await interaction.followup.send("SupportCog が無いよ。", ephemeral=True)
             return
-        if not self.bot.config.support.local_repo_path:
-            await interaction.followup.send(
-                "support.local_repo_path が空だよ。ローカル VRCast パスを設定してね。",
-                ephemeral=True,
-            )
-            return
+        source = (
+            "ローカル"
+            if self.bot.config.support.local_repo_path.strip()
+            else f"GitHub `{self.bot.config.support.repo}`"
+        )
         result = await support.start_rag_job(  # type: ignore[attr-defined]
             "rebuild-nim", force_nim=True, to_tag=tag.strip() or None
         )
@@ -264,7 +263,8 @@ class AdminCog(commands.Cog):
             )
             return
         await interaction.followup.send(
-            "NIM 全文 rebuild を始めたよ。40RPM なのでしばらくかかる。完了は dev 通知。",
+            f"NIM 全文 rebuild を始めたよ（取得元: {source}）。"
+            "40RPM なのでしばらくかかる。完了は dev 通知。",
             ephemeral=True,
         )
         await self.bot.notifier.notify_dev(

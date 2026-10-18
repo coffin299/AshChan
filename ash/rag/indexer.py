@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import fnmatch
 import hashlib
 import logging
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -21,6 +23,8 @@ from ash.rag.store import RagStore
 log = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str, int, int], Awaitable[None] | None]
+GITHUB_API = "https://api.github.com"
+RAW_BASE = "https://raw.githubusercontent.com"
 
 
 class RagJobCancelled(Exception):
@@ -28,7 +32,7 @@ class RagJobCancelled(Exception):
 
 
 class RagIndexer:
-    """フル bootstrap とタグ差分更新。"""
+    """フル bootstrap とタグ差分更新（ローカル or GitHub リモート）。"""
 
     def __init__(
         self,
@@ -61,6 +65,16 @@ class RagIndexer:
     async def close(self) -> None:
         await self.embedder.close()
 
+    def _local_root(self, repo_path: Path | None) -> Path | None:
+        """使えるローカル clone があれば Path、無ければ None。"""
+        if repo_path is not None:
+            root = repo_path.expanduser().resolve()
+        elif self.config.local_repo_path.strip():
+            root = Path(self.config.local_repo_path).expanduser().resolve()
+        else:
+            return None
+        return root if root.is_dir() else None
+
     async def bootstrap(
         self,
         *,
@@ -70,9 +84,25 @@ class RagIndexer:
         on_progress: ProgressCallback | None = None,
     ) -> int:
         """全文インデックス。force で既存チャンクを消して作り直す。"""
-        root = self._resolve_repo(repo_path)
         if force:
             await self.store.clear_all()
+        root = self._local_root(repo_path)
+        if root is not None:
+            chunk_total = await self._bootstrap_local(root, tag, on_progress)
+        else:
+            log.info("RAG bootstrap via GitHub remote (%s @ %s)", self.config.repo, tag)
+            chunk_total = await self._bootstrap_github(tag, on_progress)
+        await self.store.set_meta("current_tag", tag)
+        await self.store.set_meta("embed_model", self.embedder.model)
+        await self.store.set_meta("indexed_at", str(time.time()))
+        return chunk_total
+
+    async def _bootstrap_local(
+        self,
+        root: Path,
+        tag: str,
+        on_progress: ProgressCallback | None,
+    ) -> int:
         files = list(self._iter_files(root))
         total = len(files)
         done = 0
@@ -87,9 +117,28 @@ class RagIndexer:
             chunk_total += n
             done += 1
             await self._progress(on_progress, f"indexed {rel}", done, total)
-        await self.store.set_meta("current_tag", tag)
-        await self.store.set_meta("embed_model", self.embedder.model)
-        await self.store.set_meta("indexed_at", str(time.time()))
+        return chunk_total
+
+    async def _bootstrap_github(
+        self,
+        tag: str,
+        on_progress: ProgressCallback | None,
+    ) -> int:
+        paths = await self._github_list_paths(tag)
+        total = len(paths)
+        done = 0
+        chunk_total = 0
+        async with aiohttp.ClientSession() as session:
+            for rel in paths:
+                self._check_cancel()
+                text = await self._github_fetch_file(session, tag, rel)
+                if text is None:
+                    done += 1
+                    continue
+                n = await self._index_text(rel, text, tag)
+                chunk_total += n
+                done += 1
+                await self._progress(on_progress, f"indexed {rel}", done, total)
         return chunk_total
 
     async def apply_diff(
@@ -101,33 +150,64 @@ class RagIndexer:
         on_progress: ProgressCallback | None = None,
     ) -> int:
         """from_tag..to_tag の差分だけ更新する。"""
-        root = self._resolve_repo(repo_path)
-        changes = self._git_name_status(root, from_tag, to_tag)
+        root = self._local_root(repo_path)
+        if root is not None:
+            changes = self._git_name_status(root, from_tag, to_tag)
+            reader = lambda rel: self._read_text(root / rel) if (root / rel).is_file() else None
+        else:
+            log.info(
+                "RAG diff via GitHub compare (%s %s..%s)",
+                self.config.repo,
+                from_tag,
+                to_tag,
+            )
+            changes = await self._github_compare(from_tag, to_tag)
+            reader = None  # set below with session
+
         if not changes:
-            # タグ間に差が無くても current を進める
             await self.store.set_meta("prev_tag", from_tag)
             await self.store.set_meta("current_tag", to_tag)
             await self.store.set_meta("indexed_at", str(time.time()))
             return 0
+
         total = len(changes)
         done = 0
         chunk_total = 0
-        for status, rel in changes:
-            self._check_cancel()
-            if not self._path_included(rel):
-                done += 1
-                continue
-            if status == "D":
-                await self.store.delete_path(rel)
-            else:
-                abs_path = root / rel
-                text = self._read_text(abs_path) if abs_path.is_file() else None
-                if text is None:
+
+        if root is not None:
+            for status, rel in changes:
+                self._check_cancel()
+                if not self._path_included(rel):
+                    done += 1
+                    continue
+                if status == "D":
                     await self.store.delete_path(rel)
                 else:
-                    chunk_total += await self._index_text(rel, text, to_tag)
-            done += 1
-            await self._progress(on_progress, f"{status} {rel}", done, total)
+                    text = reader(rel) if reader else None
+                    if text is None:
+                        await self.store.delete_path(rel)
+                    else:
+                        chunk_total += await self._index_text(rel, text, to_tag)
+                done += 1
+                await self._progress(on_progress, f"{status} {rel}", done, total)
+        else:
+            async with aiohttp.ClientSession() as session:
+                for status, rel in changes:
+                    self._check_cancel()
+                    if not self._path_included(rel):
+                        done += 1
+                        continue
+                    if status == "D":
+                        await self.store.delete_path(rel)
+                    else:
+                        text = await self._github_fetch_file(session, to_tag, rel)
+                        if text is None:
+                            await self.store.delete_path(rel)
+                        else:
+                            chunk_total += await self._index_text(rel, text, to_tag)
+                    done += 1
+                    await self._progress(on_progress, f"{status} {rel}", done, total)
+
         await self.store.set_meta("prev_tag", from_tag)
         await self.store.set_meta("current_tag", to_tag)
         await self.store.set_meta("embed_model", self.embedder.model)
@@ -144,13 +224,10 @@ class RagIndexer:
     async def fetch_latest_release_tag(self) -> str:
         """GitHub の最新リリースタグを返す。"""
         owner, name = self._owner_repo()
-        url = f"https://api.github.com/repos/{owner}/{name}/releases/latest"
+        url = f"{GITHUB_API}/repos/{owner}/{name}/releases/latest"
         async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, headers={"Accept": "application/vnd.github+json"}
-            ) as resp:
+            async with session.get(url, headers=self._github_headers()) as resp:
                 if resp.status == 404:
-                    # リリースが無ければ tags の先頭
                     return await self._fetch_latest_tag(session)
                 resp.raise_for_status()
                 data = await resp.json()
@@ -158,10 +235,8 @@ class RagIndexer:
 
     async def _fetch_latest_tag(self, session: aiohttp.ClientSession) -> str:
         owner, name = self._owner_repo()
-        url = f"https://api.github.com/repos/{owner}/{name}/tags?per_page=1"
-        async with session.get(
-            url, headers={"Accept": "application/vnd.github+json"}
-        ) as resp:
+        url = f"{GITHUB_API}/repos/{owner}/{name}/tags?per_page=1"
+        async with session.get(url, headers=self._github_headers()) as resp:
             resp.raise_for_status()
             data = await resp.json()
         if not data:
@@ -181,7 +256,6 @@ class RagIndexer:
         if not target:
             raise EmbedError("could not resolve target release tag")
         if not current:
-            # 初回はフル bootstrap
             n = await self.bootstrap(
                 repo_path=repo_path, tag=target, force=True, on_progress=on_progress
             )
@@ -195,6 +269,130 @@ class RagIndexer:
             on_progress=on_progress,
         )
         return (current, target, n)
+
+    # ------------------------------------------------------------
+    # GitHub remote helpers
+    # ------------------------------------------------------------
+    def _github_headers(self) -> dict[str, str]:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "AshChan-RAG",
+        }
+        token = (
+            os.environ.get("GITHUB_TOKEN")
+            or os.environ.get("GH_TOKEN")
+            or self.config.github_token
+            or ""
+        ).strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    async def _github_list_paths(self, ref: str) -> list[str]:
+        """指定 ref のツリーからインデックス対象パスを列挙する。"""
+        owner, name = self._owner_repo()
+        url = f"{GITHUB_API}/repos/{owner}/{name}/git/trees/{ref}?recursive=1"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=self._github_headers()) as resp:
+                if resp.status == 404:
+                    raise EmbedError(f"GitHub ref not found: {ref}")
+                if resp.status == 403:
+                    raise EmbedError(
+                        "GitHub API rate limited; set support.github_token "
+                        "(or GITHUB_TOKEN) / local_repo_path"
+                    )
+                resp.raise_for_status()
+                data = await resp.json()
+        if data.get("truncated"):
+            log.warning("GitHub tree truncated; some files may be missing")
+        paths: list[str] = []
+        for item in data.get("tree") or []:
+            if item.get("type") != "blob":
+                continue
+            rel = str(item.get("path") or "").replace("\\", "/")
+            if rel and self._path_included(rel):
+                paths.append(rel)
+        return paths
+
+    async def _github_compare(
+        self, from_tag: str, to_tag: str
+    ) -> list[tuple[str, str]]:
+        """Compare API で name-status 相当を返す。"""
+        owner, name = self._owner_repo()
+        url = f"{GITHUB_API}/repos/{owner}/{name}/compare/{from_tag}...{to_tag}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=self._github_headers()) as resp:
+                if resp.status == 404:
+                    raise EmbedError(f"GitHub compare not found: {from_tag}...{to_tag}")
+                if resp.status == 403:
+                    raise EmbedError(
+                        "GitHub API rate limited; set support.github_token "
+                        "(or GITHUB_TOKEN) / local_repo_path"
+                    )
+                resp.raise_for_status()
+                data = await resp.json()
+        changes: list[tuple[str, str]] = []
+        for file in data.get("files") or []:
+            status = str(file.get("status") or "")
+            path = str(file.get("filename") or "").replace("\\", "/")
+            if not path:
+                continue
+            if status == "removed":
+                changes.append(("D", path))
+            elif status == "renamed":
+                prev = str(file.get("previous_filename") or "").replace("\\", "/")
+                if prev:
+                    changes.append(("D", prev))
+                changes.append(("A", path))
+            else:
+                # added / modified / changed / copied
+                changes.append(("M", path))
+        return changes
+
+    async def _github_fetch_file(
+        self, session: aiohttp.ClientSession, ref: str, rel: str
+    ) -> str | None:
+        """raw.githubusercontent.com → Contents API の順で本文を取る。"""
+        owner, name = self._owner_repo()
+        raw_url = f"{RAW_BASE}/{owner}/{name}/{ref}/{rel}"
+        try:
+            async with session.get(raw_url, headers={"User-Agent": "AshChan-RAG"}) as resp:
+                if resp.status == 200:
+                    raw = await resp.read()
+                    return self._decode_bytes(raw)
+        except aiohttp.ClientError as exc:
+            log.debug("raw fetch failed %s: %s", rel, exc)
+
+        api_url = f"{GITHUB_API}/repos/{owner}/{name}/contents/{rel}?ref={ref}"
+        try:
+            async with session.get(api_url, headers=self._github_headers()) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+        except aiohttp.ClientError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        content = data.get("content")
+        if not content:
+            return None
+        try:
+            raw = base64.b64decode(content)
+        except (ValueError, TypeError):
+            return None
+        return self._decode_bytes(raw)
+
+    @staticmethod
+    def _decode_bytes(raw: bytes) -> str | None:
+        if b"\0" in raw[:8000]:
+            return None
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                return raw.decode("cp932")
+            except UnicodeDecodeError:
+                return None
 
     async def _index_text(self, rel: str, text: str, tag: str) -> int:
         limited = text[: self.config.max_file_chars]
@@ -213,21 +411,6 @@ class RagIndexer:
             (c.index, c.text, vectors[i]) for i, c in enumerate(chunks)
         ]
         return await self.store.replace_file_chunks(rel, tag, digest, payload)
-
-    def _resolve_repo(self, repo_path: Path | None) -> Path:
-        if repo_path is not None:
-            root = repo_path
-        elif self.config.local_repo_path:
-            root = Path(self.config.local_repo_path)
-        else:
-            raise EmbedError(
-                "local_repo_path is empty; set support.local_repo_path "
-                "or pass --repo-path"
-            )
-        root = root.expanduser().resolve()
-        if not root.is_dir():
-            raise EmbedError(f"repo path not found: {root}")
-        return root
 
     def _owner_repo(self) -> tuple[str, str]:
         parts = self.config.repo.strip().split("/")
@@ -267,7 +450,6 @@ class RagIndexer:
                 return True
             if fnmatch.fnmatch(posix.split("/")[-1], tail):
                 return True
-            # **/Library/** → パス断片
             if tail.endswith("/**"):
                 fragment = tail[:-3]
                 if f"/{fragment}/" in f"/{posix}/" or posix.startswith(f"{fragment}/"):
@@ -279,15 +461,7 @@ class RagIndexer:
             raw = path.read_bytes()
         except OSError:
             return None
-        if b"\0" in raw[:8000]:
-            return None
-        try:
-            return raw.decode("utf-8")
-        except UnicodeDecodeError:
-            try:
-                return raw.decode("cp932")
-            except UnicodeDecodeError:
-                return None
+        return self._decode_bytes(raw)
 
     @staticmethod
     def _git_name_status(
@@ -322,7 +496,6 @@ class RagIndexer:
             if len(parts) < 2:
                 continue
             status = parts[0][0]
-            # rename: R100\told\tnew
             if status == "R" and len(parts) >= 3:
                 changes.append(("D", parts[1].replace("\\", "/")))
                 changes.append(("A", parts[2].replace("\\", "/")))

@@ -63,9 +63,19 @@ class SupportCog(commands.Cog):
             self._job_indexer.request_cancel()
         if self._job_task and not self._job_task.done():
             self._job_task.cancel()
+            try:
+                await self._job_task
+            except (asyncio.CancelledError, Exception):
+                pass
         if self._retriever and self._retriever.embedder:
-            await self._retriever.embedder.close()
-        await self._rag_store.close()
+            try:
+                await self._retriever.embedder.close()
+            except Exception:
+                log.debug("embedder close on unload failed", exc_info=True)
+        try:
+            await self._rag_store.close()
+        except Exception:
+            log.debug("rag store close on unload failed", exc_info=True)
 
     # ------------------------------------------------------------
     # 公開: チャット Cog からの判定
