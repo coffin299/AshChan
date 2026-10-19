@@ -238,10 +238,16 @@ class SupportConfig:
         "アッシュちゃんはコードベースから解決策を考えます。"
         "リプライで会話を続けるか、下記ボタンから開発者にエスカレーションしてください。"
     )
+    footer_hint_en: str = (
+        "Ash looks through the codebase for fixes. "
+        "Reply to continue, or use the buttons below to escalate to a developer."
+    )
     llm_retry_count: int = 3
     llm_retry_delay_sec: float = 30.0
     resolve_button_label: str = "解決した"
     escalate_button_label: str = "開発者に聞く"
+    resolve_button_label_en: str = "Resolved"
+    escalate_button_label_en: str = "Ask a developer"
 
 
 @dataclass

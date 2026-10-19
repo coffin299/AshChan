@@ -722,9 +722,13 @@ support:
   # 型: 整数 / 既定: 6
   max_turns_before_hint: 6
 
-  # 最新 Components V2 メッセージに載せる固定案内。
+  # 最新 Components V2 メッセージに載せる固定案内（日本語スレ）。
   # 型: 文字列
   footer_hint: "アッシュちゃんはコードベースから解決策を考えます。リプライで会話を続けるか、下記ボタンから開発者にエスカレーションしてください。"
+
+  # 英語スレ用の固定案内。空なら内蔵英語文を使う。
+  # 型: 文字列
+  footer_hint_en: "Ash looks through the codebase for fixes. Reply to continue, or use the buttons below to escalate to a developer."
 
   # LLM / RAG 失敗時の最大試行回数。
   # 型: 整数 / 既定: 3
@@ -734,9 +738,13 @@ support:
   # 型: 小数 / 既定: 30
   llm_retry_delay_sec: 30
 
-  # ボタンラベル。
+  # ボタンラベル（日本語スレ）。
   resolve_button_label: "解決した"
   escalate_button_label: "開発者に聞く"
+
+  # ボタンラベル（英語スレ）。
+  resolve_button_label_en: "Resolved"
+  escalate_button_label_en: "Ask a developer"
 
 
 # ============================================================

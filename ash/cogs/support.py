@@ -24,6 +24,7 @@ from ash.llm.support_status import (
     SupportFailureView,
     SupportReplyView,
     SupportStatusMessage,
+    set_escalate_pending,
     strip_message_buttons,
 )
 from ash.notifier import COLOR_DANGER, COLOR_INFO, make_embed
@@ -32,6 +33,7 @@ from ash.rag.html_text import html_to_text
 from ash.rag.indexer import RagIndexer, RagJobCancelled
 from ash.rag.retriever import RagRetriever
 from ash.rag.store import RagStore
+from ash.support_i18n import detect_locale, normalize_locale, t
 
 log = logging.getLogger(__name__)
 JST = timezone(timedelta(hours=9))
@@ -72,6 +74,8 @@ class SupportCog(commands.Cog):
         self._job_task: asyncio.Task[None] | None = None
         self._job_indexer: RagIndexer | None = None
         self._busy_threads: set[int] = set()
+        # エスカレーション二重実行防止（ボタン連打・遅延中の再クリック）
+        self._escalate_locks: set[int] = set()
 
     async def cog_load(self) -> None:
         await self._rag_store.connect()
@@ -560,9 +564,11 @@ class SupportCog(commands.Cog):
             thread_id = int(parts[3])
         except ValueError:
             return
-        if parts[-1] == "dead":
+        if parts[-1] in ("dead", "busy"):
+            state = await self.bot.db.get_support_thread(thread_id)
+            loc = normalize_locale(str(state.get("locale") or "ja"))
             await interaction.response.send_message(
-                "この操作はもう使えないよ。", ephemeral=True
+                self._ui(loc, "button_busy"), ephemeral=True
             )
             return
         if action == "resolve":
@@ -580,10 +586,30 @@ class SupportCog(commands.Cog):
         target = ref.resolved or ref.cached_message
         return isinstance(target, discord.Message) and target.author.id == me.id
 
+    def _ui(self, locale: str, key: str) -> str:
+        """config 上書き込みの UI 文字列。"""
+        cfg = self.bot.config.support
+        loc = normalize_locale(locale)
+        if loc == "en":
+            overrides = {
+                "footer_hint": cfg.footer_hint_en,
+                "resolve_button": cfg.resolve_button_label_en,
+                "escalate_button": cfg.escalate_button_label_en,
+            }
+        else:
+            overrides = {
+                "footer_hint": cfg.footer_hint,
+                "resolve_button": cfg.resolve_button_label,
+                "escalate_button": cfg.escalate_button_label,
+            }
+        raw = overrides.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        return t(loc, key)
+
     async def _handle_user_message(
         self, message: discord.Message, *, first_turn: bool
     ) -> None:
-        cfg = self.bot.config.support
         channel = message.channel
         if not isinstance(channel, discord.Thread):
             return
@@ -595,9 +621,17 @@ class SupportCog(commands.Cog):
                 pass
             return
 
+        detected = "ja"
+        if first_turn:
+            seed = f"{channel.name}\n{message.content or ''}"
+            detected = detect_locale(seed)
+
         state = await self.bot.db.ensure_support_thread(
-            thread_id, message.author.id
+            thread_id,
+            message.author.id,
+            locale=detected if first_turn else None,
         )
+        locale = normalize_locale(str(state.get("locale") or detected))
         status = str(state.get("status") or "open")
         if status in ("resolved", "failed"):
             return
@@ -606,26 +640,31 @@ class SupportCog(commands.Cog):
         forum_name = self._forum_name(channel)
         self.bot.presence.begin_support(thread_id, forum_name)
         await self.bot.presence.bump()
-        status_msg = SupportStatusMessage(message)
+        status_msg = SupportStatusMessage(message, locale=locale)
         try:
             await status_msg.set_phase(PHASE_START)
             answer = await self._run_with_retries(
-                message, status_msg, first_turn=first_turn
+                message,
+                status_msg,
+                first_turn=first_turn,
+                locale=locale,
             )
             if answer is None:
                 return
-            await self._strip_previous_buttons(channel, state)
+            await self._strip_previous_buttons(channel, state, locale=locale)
             view = SupportReplyView(
                 body=answer,
-                footer_hint=cfg.footer_hint,
+                footer_hint=self._ui(locale, "footer_hint"),
                 thread_id=thread_id,
-                resolve_label=cfg.resolve_button_label,
-                escalate_label=cfg.escalate_button_label,
+                resolve_label=self._ui(locale, "resolve_button"),
+                escalate_label=self._ui(locale, "escalate_button"),
                 enabled=True,
             )
             final = await status_msg.finalize_success(view)
             await self.bot.db.set_support_action_message(thread_id, final.id)
-            user_turn = self._format_user_turn(message, first_turn=first_turn)
+            user_turn = self._format_user_turn(
+                message, first_turn=first_turn, locale=locale
+            )
             await self.bot.db.add_history(thread_id, "user", user_turn)
             await self.bot.db.add_history(thread_id, "assistant", answer)
             await self.bot.db.trim_history(
@@ -643,6 +682,7 @@ class SupportCog(commands.Cog):
         status_msg: SupportStatusMessage,
         *,
         first_turn: bool,
+        locale: str,
     ) -> str | None:
         cfg = self.bot.config.support
         attempts = max(1, cfg.llm_retry_count)
@@ -650,7 +690,10 @@ class SupportCog(commands.Cog):
         for attempt in range(1, attempts + 1):
             try:
                 return await self._generate_answer(
-                    message, status_msg, first_turn=first_turn
+                    message,
+                    status_msg,
+                    first_turn=first_turn,
+                    locale=locale,
                 )
             except (LLMError, EmbedError, OSError, aiohttp.ClientError) as exc:
                 last_error = exc
@@ -661,7 +704,9 @@ class SupportCog(commands.Cog):
                     break
                 await status_msg.set_phase(PHASE_RETRY)
                 await asyncio.sleep(cfg.llm_retry_delay_sec)
-        await self._finalize_failure(message, status_msg, last_error)
+        await self._finalize_failure(
+            message, status_msg, last_error, locale=locale
+        )
         return None
 
     async def _generate_answer(
@@ -670,11 +715,13 @@ class SupportCog(commands.Cog):
         status_msg: SupportStatusMessage,
         *,
         first_turn: bool,
+        locale: str,
     ) -> str:
-        cfg = self.bot.config.support
         await status_msg.set_phase(PHASE_ATTACHMENTS)
         attachments = await self._read_attachments(message)
-        query = self._format_user_turn(message, first_turn=first_turn)
+        query = self._format_user_turn(
+            message, first_turn=first_turn, locale=locale
+        )
         if attachments:
             query = f"{query}\n\n[attachments]\n{attachments}"
 
@@ -686,14 +733,17 @@ class SupportCog(commands.Cog):
             context = RagRetriever.format_context(hits)
         except EmbedError as exc:
             log.warning("RAG retrieve failed: %s", exc)
-            # インデックス無しでも会話は続ける
             context = ""
 
         await status_msg.set_phase(PHASE_LLM)
         history = await self.bot.db.get_history(
             message.channel.id, self.bot.config.llm.history_turns * 2
         )
-        system = self._system_prompt(first_turn=first_turn, has_context=bool(context))
+        system = self._system_prompt(
+            first_turn=first_turn,
+            has_context=bool(context),
+            locale=locale,
+        )
         user_content = query
         if context:
             user_content = (
@@ -714,30 +764,28 @@ class SupportCog(commands.Cog):
         message: discord.Message,
         status_msg: SupportStatusMessage,
         error: Exception | None,
+        *,
+        locale: str,
     ) -> None:
         cfg = self.bot.config.support
         thread = message.channel
         assert isinstance(thread, discord.Thread)
         await self.bot.db.set_support_status(thread.id, "failed")
-        body = (
-            "ごめん、いま LLM サポートがうまく動かなくて失敗しちゃった。"
-            "開発者にバトン渡すね。しばらく待ってて。"
-        )
+        body = self._ui(locale, "failure_body")
         if error:
             log.error("support failed permanently: %s", error)
         view = SupportFailureView(
             body=body,
             thread_id=thread.id,
-            resolve_label=cfg.resolve_button_label,
-            escalate_label=cfg.escalate_button_label,
+            resolve_label=self._ui(locale, "resolve_button"),
+            escalate_label=self._ui(locale, "escalate_button"),
         )
-        # Components V2 は content と併用できないので、メンションは別メッセージ
         await status_msg.finalize_failure(view)
         mentions = " ".join(f"<@{uid}>" for uid in cfg.admin_user_ids)
         if mentions:
             try:
                 await thread.send(
-                    f"{mentions}\nLLM サポートに失敗したよ。手動で見てほしい。",
+                    f"{mentions}\n{self._ui(locale, 'failure_mention')}",
                     allowed_mentions=discord.AllowedMentions(
                         users=True, roles=False, everyone=False
                     ),
@@ -753,7 +801,11 @@ class SupportCog(commands.Cog):
         )
 
     async def _strip_previous_buttons(
-        self, thread: discord.Thread, state: dict[str, Any]
+        self,
+        thread: discord.Thread,
+        state: dict[str, Any],
+        *,
+        locale: str = "ja",
     ) -> None:
         msg_id = int(state.get("last_action_message_id") or 0)
         if not msg_id:
@@ -771,7 +823,7 @@ class SupportCog(commands.Cog):
                     body = item["content"]
                     break
         if not body.strip():
-            body = "（前回の返信）"
+            body = self._ui(locale, "prev_reply")
         await strip_message_buttons(old, body)
 
     async def _on_resolve(
@@ -785,6 +837,7 @@ class SupportCog(commands.Cog):
             )
             return
         state = await self.bot.db.get_support_thread(thread_id)
+        locale = normalize_locale(str(state.get("locale") or "ja"))
         owner_id = int(state.get("owner_id") or 0)
         member = interaction.user
         is_staff = False
@@ -792,7 +845,7 @@ class SupportCog(commands.Cog):
             is_staff = member.guild_permissions.manage_threads or member.guild_permissions.administrator
         if member.id != owner_id and not is_staff:
             await interaction.response.send_message(
-                "スレ主かスタッフだけが解決にできるよ。", ephemeral=True
+                self._ui(locale, "resolve_forbidden"), ephemeral=True
             )
             return
         await interaction.response.defer(ephemeral=True)
@@ -813,17 +866,26 @@ class SupportCog(commands.Cog):
             await thread.edit(archived=True)
         except discord.HTTPException:
             pass
-        # 最新メッセージのボタンを外す
         msg_id = int(state.get("last_action_message_id") or 0)
         if msg_id and interaction.message and interaction.message.id == msg_id:
             try:
                 await strip_message_buttons(
                     interaction.message,
-                    "解決済みとしてクローズしたよ。また何かあったらスレ立ててね。",
+                    self._ui(locale, "resolve_closed_body"),
                 )
             except Exception:
                 pass
-        await interaction.followup.send("解決として閉じたよ。お疲れ！", ephemeral=True)
+        await interaction.followup.send(
+            self._ui(locale, "resolve_done"), ephemeral=True
+        )
+
+    async def _escalate_reject(
+        self, interaction: discord.Interaction, message: str
+    ) -> None:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
 
     async def _on_escalate(
         self, interaction: discord.Interaction, thread_id: int
@@ -835,45 +897,124 @@ class SupportCog(commands.Cog):
                 "スレ情報を取れなかったよ。", ephemeral=True
             )
             return
-        await interaction.response.defer()
-        await self.bot.db.set_support_status(thread_id, "escalated")
-        self.bot.presence.begin_support(thread_id, self._forum_name(thread))
-        await self.bot.presence.bump()
-        try:
-            brief = await self._build_developer_brief(thread)
-        finally:
-            self.bot.presence.end_support(thread_id)
-            await self.bot.presence.bump()
 
-        mentions = " ".join(f"<@{uid}>" for uid in cfg.admin_user_ids) or "（管理者未設定）"
-        header = f"{mentions}\n**開発者エスカレーション** — `{thread.name}`"
-        # Discord 2000 文字制限: ヘッダ + 本文を分割送信
-        await thread.send(
-            header,
-            allowed_mentions=discord.AllowedMentions(
-                users=True, roles=False, everyone=False
-            ),
-        )
-        for chunk in self._split_discord_chunks(brief, limit=1900):
-            await thread.send(
-                chunk,
-                allowed_mentions=discord.AllowedMentions.none(),
+        # await 前にロックを取り、連打での二重実行を防ぐ
+        if thread_id in self._escalate_locks:
+            state_busy = await self.bot.db.get_support_thread(thread_id)
+            loc_busy = normalize_locale(str(state_busy.get("locale") or "ja"))
+            await self._escalate_reject(
+                interaction, self._ui(loc_busy, "escalate_busy")
             )
+            return
+        self._escalate_locks.add(thread_id)
+        try:
+            state = await self.bot.db.get_support_thread(thread_id)
+            locale = normalize_locale(str(state.get("locale") or "ja"))
+            status = str(state.get("status") or "open")
+            if status == "escalated":
+                await self._escalate_reject(
+                    interaction, self._ui(locale, "escalate_already")
+                )
+                return
 
-        if interaction.message:
+            await interaction.response.defer(ephemeral=True)
+            await self.bot.db.set_support_status(thread_id, "escalated")
+
+            body_text = self._ui(locale, "escalate_done_body")
             hist = await self.bot.db.get_history(thread_id, 2)
-            body = "開発者にエスカレーション済み。詳細は上のまとめを見てね。"
             for item in reversed(hist):
                 if item["role"] == "assistant":
-                    body = item["content"]
+                    body_text = item["content"]
                     break
+
+            # 1) ボタン無効化 + 「生成中」表示（ユーザー向けはスレ言語）
+            progress: discord.Message | None = None
+            generating = self._ui(locale, "escalate_generating")
+            if interaction.message:
+                try:
+                    await set_escalate_pending(
+                        interaction.message,
+                        body=body_text,
+                        thread_id=thread_id,
+                        resolve_label=self._ui(locale, "resolve_button"),
+                        escalate_label=self._ui(locale, "escalate_button"),
+                        status_text=generating,
+                    )
+                except Exception:
+                    log.warning("escalate pending view failed", exc_info=True)
             try:
-                await strip_message_buttons(interaction.message, body)
-            except Exception:
-                pass
-        await interaction.followup.send(
-            "開発者向けのまとめを出してメンションしたよ。", ephemeral=True
-        )
+                progress = await thread.send(generating)
+            except discord.HTTPException:
+                progress = None
+
+            self.bot.presence.begin_support(thread_id, self._forum_name(thread))
+            await self.bot.presence.bump()
+            brief = ""
+            try:
+                try:
+                    # 開発者向けサマリーは常に日本語
+                    brief = await self._build_developer_brief(thread)
+                except Exception as exc:
+                    log.exception("escalate brief failed")
+                    if progress is not None:
+                        try:
+                            await progress.edit(
+                                content=self._ui(
+                                    locale, "escalate_failed_progress"
+                                )
+                            )
+                        except discord.HTTPException:
+                            pass
+                    if interaction.message:
+                        try:
+                            await strip_message_buttons(
+                                interaction.message, body_text
+                            )
+                        except Exception:
+                            pass
+                    await interaction.followup.send(
+                        f"{self._ui(locale, 'escalate_failed_followup')}: `{exc}`",
+                        ephemeral=True,
+                    )
+                    return
+            finally:
+                self.bot.presence.end_support(thread_id)
+                await self.bot.presence.bump()
+
+            # 2) 生成後にボタン消去 → 日本語サマリー投稿
+            if interaction.message:
+                try:
+                    await strip_message_buttons(interaction.message, body_text)
+                except Exception:
+                    pass
+            if progress is not None:
+                try:
+                    await progress.delete()
+                except discord.HTTPException:
+                    pass
+
+            mentions = (
+                " ".join(f"<@{uid}>" for uid in cfg.admin_user_ids)
+                or "（管理者未設定）"
+            )
+            # ヘッダ・本文は開発者向けのため常に日本語
+            header = f"{mentions}\n**開発者エスカレーション** — `{thread.name}`"
+            await thread.send(
+                header,
+                allowed_mentions=discord.AllowedMentions(
+                    users=True, roles=False, everyone=False
+                ),
+            )
+            for chunk in self._split_discord_chunks(brief, limit=1900):
+                await thread.send(
+                    chunk,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            await interaction.followup.send(
+                self._ui(locale, "escalate_done_followup"), ephemeral=True
+            )
+        finally:
+            self._escalate_locks.discard(thread_id)
 
     async def _build_developer_brief(self, thread: discord.Thread) -> str:
         """会話履歴・ログ・RAG から開発者向け引き継ぎメモを作る。"""
@@ -1042,7 +1183,9 @@ class SupportCog(commands.Cog):
             )
         return self._retriever
 
-    def _system_prompt(self, *, first_turn: bool, has_context: bool) -> str:
+    def _system_prompt(
+        self, *, first_turn: bool, has_context: bool, locale: str
+    ) -> str:
         now = datetime.now(JST).strftime("%Y-%m-%d %H:%M (JST)")
         support_extra = self._read_support_prompt()
         notes = [
@@ -1050,26 +1193,61 @@ class SupportCog(commands.Cog):
             support_extra or DEFAULT_SUPPORT_PROMPT,
             f"現在日時: {now}",
         ]
-        if first_turn:
+        loc = normalize_locale(locale)
+        escalate_label = self._ui(loc, "escalate_button")
+        if loc == "en":
             notes.append(
-                "これはスレの最初の返信。短い自己紹介のあと、状況の整理と"
-                "不足情報（バージョン・再現手順・出力txt・ログ）を聞いて。"
+                "LANGUAGE: Reply entirely in English for this thread. "
+                "Keep Ash's personality, but write all user-facing text in English."
             )
-        else:
-            notes.append("続きの会話。自己紹介は不要。")
-        if has_context:
+            if first_turn:
+                notes.append(
+                    "This is the first reply in the thread. Give a short intro, "
+                    "summarize the issue, then ask for missing info "
+                    "(VRCast/Converter version, repro steps, output txt / logs)."
+                )
+            else:
+                notes.append("Follow-up turn. No self-introduction.")
+            if has_context:
+                notes.append(
+                    "Prefer Retrieved knowledge. Mention file/feature names lightly "
+                    "if useful; explain in user-friendly English."
+                )
+            else:
+                notes.append(
+                    "Knowledge base may be empty; still help with general guidance "
+                    "and clarifying questions."
+                )
+            turns_hint = self.bot.config.support.max_turns_before_hint
             notes.append(
-                "Retrieved knowledge を根拠に答える。出典パス名を必要なら軽く触れてよいが、"
-                "ユーザー向けに噛み砕くこと。"
+                f"If stuck after many turns, suggest the 「{escalate_label}」 button "
+                f"(around {turns_hint} turns)."
             )
+            notes.append("Use Discord Markdown. Keep replies under ~1500 characters.")
         else:
-            notes.append("ナレッジが空でも、一般知識と聞き取りでサポートする。")
-        turns_hint = self.bot.config.support.max_turns_before_hint
-        notes.append(
-            f"往復が多く難航しているときは「開発者に聞く」ボタンを案内してよい"
-            f"（目安 {turns_hint} 往復）。"
-        )
-        notes.append("返答は Discord Markdown、だいたい1500文字以内。")
+            if first_turn:
+                notes.append(
+                    "これはスレの最初の返信。短い自己紹介のあと、状況の整理と"
+                    "不足情報（バージョン・再現手順・出力txt・ログ）を聞いて。"
+                )
+            else:
+                notes.append("続きの会話。自己紹介は不要。")
+            if has_context:
+                notes.append(
+                    "Retrieved knowledge を根拠に答える。出典パス名を必要なら軽く触れてよいが、"
+                    "ユーザー向けに噛み砕くこと。"
+                )
+            else:
+                notes.append("ナレッジが空でも、一般知識と聞き取りでサポートする。")
+            turns_hint = self.bot.config.support.max_turns_before_hint
+            notes.append(
+                f"往復が多く難航しているときは「{escalate_label}」ボタンを案内してよい"
+                f"（目安 {turns_hint} 往復）。"
+            )
+            notes.append(
+                "このスレは日本語。ユーザー向け返答は日本語で。"
+                "返答は Discord Markdown、だいたい1500文字以内。"
+            )
         return "\n\n".join(notes)
 
     def _read_support_prompt(self) -> str:
@@ -1080,7 +1258,11 @@ class SupportCog(commands.Cog):
             return ""
 
     def _format_user_turn(
-        self, message: discord.Message, *, first_turn: bool
+        self,
+        message: discord.Message,
+        *,
+        first_turn: bool,
+        locale: str = "ja",
     ) -> str:
         text = message.content or ""
         me = self.bot.user
@@ -1091,7 +1273,7 @@ class SupportCog(commands.Cog):
             title = message.channel.name
             text = f"[thread: {title}]\n{text}".strip()
         if not text:
-            text = "（本文なし）"
+            text = self._ui(locale, "empty_body")
         return f"{message.author.display_name}: {text}"
 
     async def _read_attachments(self, message: discord.Message) -> str:

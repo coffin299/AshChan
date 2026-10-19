@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS support_threads (
     owner_id INTEGER NOT NULL DEFAULT 0,
     last_action_message_id INTEGER NOT NULL DEFAULT 0,
     turn_count INTEGER NOT NULL DEFAULT 0,
+    locale TEXT NOT NULL DEFAULT 'ja',
     updated_at REAL NOT NULL
 );
 """
@@ -71,7 +72,17 @@ class Database:
         # 接続してスキーマを適用する
         self._conn = await aiosqlite.connect(self._path)
         await self._conn.executescript(_SCHEMA)
+        await self._migrate()
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        """既存 DB への列追加など。"""
+        async with self.conn.execute("PRAGMA table_info(support_threads)") as cursor:
+            cols = {str(row[1]) for row in await cursor.fetchall()}
+        if "locale" not in cols:
+            await self.conn.execute(
+                "ALTER TABLE support_threads ADD COLUMN locale TEXT NOT NULL DEFAULT 'ja'"
+            )
 
     async def close(self) -> None:
         """DB 接続を閉じる。"""
@@ -234,20 +245,38 @@ class Database:
     # サポートフォーラムスレ状態
     # ------------------------------------------------------------
     async def ensure_support_thread(
-        self, thread_id: int, owner_id: int
+        self,
+        thread_id: int,
+        owner_id: int,
+        *,
+        locale: str | None = None,
     ) -> dict[str, int | str]:
         """スレ行が無ければ open で作成し、現在の状態を返す。"""
         now = time.time()
+        loc = (locale or "ja").strip().lower()
+        if loc not in ("ja", "en"):
+            loc = "ja"
         await self.conn.execute(
             """
             INSERT OR IGNORE INTO support_threads
                 (thread_id, status, owner_id, last_action_message_id,
-                 turn_count, updated_at)
-            VALUES (?, 'open', ?, 0, 0, ?)
+                 turn_count, locale, updated_at)
+            VALUES (?, 'open', ?, 0, 0, ?, ?)
             """,
-            (thread_id, owner_id, now),
+            (thread_id, owner_id, loc, now),
         )
         await self.conn.commit()
+        # 初回応答前なら locale を上書き（言語判定の確定用）
+        if locale is not None:
+            await self.conn.execute(
+                """
+                UPDATE support_threads
+                SET locale = ?, updated_at = ?
+                WHERE thread_id = ? AND turn_count = 0
+                """,
+                (loc, now, thread_id),
+            )
+            await self.conn.commit()
         return await self.get_support_thread(thread_id)
 
     async def get_support_thread(
@@ -256,7 +285,7 @@ class Database:
         """サポートスレ状態を返す（無ければ空 dict）。"""
         async with self.conn.execute(
             """
-            SELECT status, owner_id, last_action_message_id, turn_count
+            SELECT status, owner_id, last_action_message_id, turn_count, locale
             FROM support_threads WHERE thread_id = ?
             """,
             (thread_id,),
@@ -269,7 +298,23 @@ class Database:
             "owner_id": int(row[1]),
             "last_action_message_id": int(row[2]),
             "turn_count": int(row[3]),
+            "locale": str(row[4] or "ja"),
         }
+
+    async def set_support_locale(self, thread_id: int, locale: str) -> None:
+        """スレの応答言語を保存する。"""
+        loc = locale.strip().lower()
+        if loc not in ("ja", "en"):
+            loc = "ja"
+        await self.conn.execute(
+            """
+            UPDATE support_threads
+            SET locale = ?, updated_at = ?
+            WHERE thread_id = ?
+            """,
+            (loc, time.time(), thread_id),
+        )
+        await self.conn.commit()
 
     async def set_support_status(self, thread_id: int, status: str) -> None:
         """スレ状態を更新する。"""
