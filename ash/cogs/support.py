@@ -289,11 +289,11 @@ class SupportCog(commands.Cog):
                 )
                 summary = f"sync 完了 {prev or '-'}→`{target}` chunks≈{n}"
             self.invalidate_retriever()
-            await self.bot.notifier.notify_dev(
+            await self.bot.notifier.notify_public(
                 make_embed("RAG 完了", summary, COLOR_INFO)
             )
         except RagJobCancelled:
-            await self.bot.notifier.notify_dev(
+            await self.bot.notifier.notify_public(
                 make_embed("RAG キャンセル", f"{kind} を中断しました。", COLOR_INFO)
             )
         except Exception as exc:

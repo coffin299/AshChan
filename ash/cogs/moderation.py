@@ -186,10 +186,15 @@ class ModerationCog(commands.Cog):
             log.warning("%s: サーバー管理権限が無いため AutoMod を同期できません", guild)
             return
         try:
-            existing = {r.name: r for r in await guild.fetch_automod_rules()}
+            all_rules = list(await guild.fetch_automod_rules())
         except discord.HTTPException as exc:
             log.warning("%s: AutoMod ルールの取得に失敗しました: %s", guild, exc)
             return
+        existing_by_name = {r.name: r for r in all_rules}
+        # mention_spam / spam 等はタイプあたり1件までのサーバーがある
+        existing_by_type: dict[discord.AutoModRuleTriggerType, discord.AutoModRule] = {}
+        for rule in all_rules:
+            existing_by_type.setdefault(rule.trigger.type, rule)
 
         # 除外ロールは AutoMod 側にも反映する
         exempt_roles = [discord.Object(id=rid) for rid in cfg.exempt_role_ids]
@@ -225,14 +230,23 @@ class ModerationCog(commands.Cog):
                 cfg.automod.spam_rule,
             ),
         ]
+        # サーバーあたり1件までのタイプ（それ以外は名前一致のみ）
+        singleton_types = {
+            discord.AutoModRuleTriggerType.mention_spam,
+            discord.AutoModRuleTriggerType.spam,
+        }
         results: list[str] = []
         for name, trigger, enabled in specs:
+            rule = existing_by_name.get(name)
+            if rule is None and trigger.type in singleton_types:
+                # 同タイプの既存ルールを流用（MAX_RULES_OF_TYPE 対策）
+                rule = existing_by_type.get(trigger.type)
             results.append(
                 await self._upsert_rule(
-                    guild, existing.get(name), name, trigger, enabled, exempt_roles
+                    guild, rule, name, trigger, enabled, exempt_roles
                 )
             )
-        # 同期結果を dev 通知する
+        # 同期結果は非公開側へ
         await self.bot.notifier.notify_dev(
             make_embed(
                 "AutoMod 同期",
@@ -252,11 +266,9 @@ class ModerationCog(commands.Cog):
         exempt_roles: list[discord.Object],
     ) -> str:
         """AutoMod ルールを作成または更新し、結果の文字列を返す。"""
-        # ブロック時にユーザーへ表示するアクション
         actions = [discord.AutoModRuleAction(custom_message=AUTOMOD_BLOCK_MESSAGE)]
         try:
             if rule is None:
-                # 無効設定なら新規作成はしない
                 if not enabled:
                     return f"{name}: 無効（未作成）"
                 await guild.create_automod_rule(
@@ -269,21 +281,44 @@ class ModerationCog(commands.Cog):
                     reason="AshChan: AutoMod 同期",
                 )
                 return f"{name}: 作成"
-            # 既存ルールは無効設定なら無効化のみ
             if not enabled:
                 await rule.edit(enabled=False, reason="AshChan: AutoMod 同期")
                 return f"{name}: 無効化"
-            # 既存ルールを最新設定で更新する
-            await rule.edit(
-                trigger=trigger,
-                actions=actions,
-                enabled=True,
-                exempt_roles=exempt_roles,
-                reason="AshChan: AutoMod 同期",
-            )
+            # 既存（名前違いの同タイプ含む）を Ash 設定で更新。可能なら名前も揃える
+            edit_kwargs: dict = {
+                "trigger": trigger,
+                "actions": actions,
+                "enabled": True,
+                "exempt_roles": exempt_roles,
+                "reason": "AshChan: AutoMod 同期",
+            }
+            renamed = rule.name != name
+            if renamed:
+                edit_kwargs["name"] = name
+            await rule.edit(**edit_kwargs)
+            if renamed:
+                return f"{name}: 更新（既存ルール流用）"
             return f"{name}: 更新"
         except discord.HTTPException as exc:
-            # スパムルールは1サーバー1つまで等の制約で失敗することがある
+            # 作成時に枠が埋まっていた場合は同タイプを探して更新を再試行
+            if (
+                rule is None
+                and enabled
+                and "AUTO_MODERATION_MAX_RULES_OF_TYPE_EXCEEDED" in str(exc)
+            ):
+                try:
+                    for existing in await guild.fetch_automod_rules():
+                        if existing.trigger.type == trigger.type:
+                            return await self._upsert_rule(
+                                guild,
+                                existing,
+                                name,
+                                trigger,
+                                enabled,
+                                exempt_roles,
+                            )
+                except discord.HTTPException:
+                    pass
             log.warning("%s: AutoMod ルール %s の同期に失敗: %s", guild, name, exc)
             return f"{name}: 失敗（{exc.text or exc}）"
 

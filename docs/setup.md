@@ -96,7 +96,8 @@ start.bat
 | `discord.token` | ボットトークン（必須） |
 | `discord.guild_ids` | スラッシュコマンドを即時同期するサーバー ID |
 | `discord.allowed_guild_ids` | 機能を許可するサーバー（空=全サーバー。指定時は LLM 等すべてその一覧のみ） |
-| `notify.dev_channel_id` | dev 通知チャンネル |
+| `notify.dev_channel_id` | 非公開ログ（エラー・モデレーション等） |
+| `notify.public_channel_id` | 公開可ログ（起動/停止・RAG 完了等）。0 なら dev へフォールバック |
 | `notify.emergency_dm_user_ids` | 緊急 DM 先ユーザー |
 | `llm.api_key` | NVIDIA NIM の API キー |
 | `honeypot.channel_ids` | 罠チャンネル |

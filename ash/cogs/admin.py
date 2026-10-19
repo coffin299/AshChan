@@ -151,7 +151,7 @@ class AdminCog(commands.Cog):
         if github is not None:
             await github.restart_server()  # type: ignore[attr-defined]
         await interaction.followup.send("設定を読み直したよ。", ephemeral=True)
-        await self.bot.notifier.notify_dev(
+        await self.bot.notifier.notify_public(
             make_embed(
                 "設定再読込",
                 f"{interaction.user} が設定を再読込しました。",
@@ -295,7 +295,7 @@ class AdminCog(commands.Cog):
             "40RPM なのでしばらくかかる。完了は dev 通知。",
             ephemeral=True,
         )
-        await self.bot.notifier.notify_dev(
+        await self.bot.notifier.notify_public(
             make_embed(
                 "RAG rebuild-nim 開始",
                 f"{interaction.user} が全文再インデックスを開始しました。",
@@ -401,7 +401,7 @@ class AdminCog(commands.Cog):
         if skipped:
             lines.append("skipped: " + ", ".join(skipped))
         await interaction.followup.send("\n".join(lines), ephemeral=True)
-        await self.bot.notifier.notify_dev(
+        await self.bot.notifier.notify_public(
             make_embed(
                 "RAG ingest",
                 f"{interaction.user} が message `{message_id}` を取り込みました。",
@@ -458,7 +458,7 @@ class AdminCog(commands.Cog):
             "完了は dev 通知。",
             ephemeral=True,
         )
-        await self.bot.notifier.notify_dev(
+        await self.bot.notifier.notify_public(
             make_embed(
                 "RAG history 開始",
                 f"{interaction.user} が過去サポートのインデックスを開始しました。",

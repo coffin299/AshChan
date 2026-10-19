@@ -42,7 +42,10 @@ class DiscordConfig:
 class NotifyConfig:
     """通知先設定。"""
 
+    # 非公開: エラー・モデレーション・緊急など
     dev_channel_id: int = 0
+    # 公開可: 起動/停止・RAG 完了など（0 なら public 通知は dev へフォールバック）
+    public_channel_id: int = 0
     emergency_dm_user_ids: list[int] = field(default_factory=list)
 
 
@@ -364,6 +367,7 @@ def load_config(path: Path | None = None) -> Config:
     discord_cfg.guild_ids = _int_list(discord_cfg.guild_ids)
     discord_cfg.allowed_guild_ids = _int_list(discord_cfg.allowed_guild_ids)
     notify_cfg.dev_channel_id = int(notify_cfg.dev_channel_id or 0)
+    notify_cfg.public_channel_id = int(notify_cfg.public_channel_id or 0)
     notify_cfg.emergency_dm_user_ids = _int_list(notify_cfg.emergency_dm_user_ids)
     moderation_cfg.exempt_role_ids = _int_list(moderation_cfg.exempt_role_ids)
     antinuke_cfg.whitelist_user_ids = _int_list(antinuke_cfg.whitelist_user_ids)

@@ -160,7 +160,7 @@ class AshBot(commands.Bot):
         self.presence.start()
         await self.presence.bump()
         # 起動を dev 通知する
-        await self.notifier.notify_dev(
+        await self.notifier.notify_public(
             make_embed(
                 "アッシュ起動",
                 f"{self.user} としてログインしました。",
@@ -179,7 +179,7 @@ class AshBot(commands.Bot):
         # まだ接続中なら停止を通知する
         if self.is_ready() and not self.is_closed():
             try:
-                await self.notifier.notify_dev(
+                await self.notifier.notify_public(
                     make_embed("アッシュ停止", "ボットを停止します。", COLOR_INFO)
                 )
             except Exception:
