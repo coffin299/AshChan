@@ -72,6 +72,8 @@ class FixLinkCog(commands.Cog):
         # 機能 OFF・サーバー外・ボット・Webhook は対象外
         if not cfg.enabled or message.guild is None:
             return
+        if not self.bot.is_guild_allowed(message.guild.id):
+            return
         if message.author.bot or message.webhook_id:
             return
         # 除外チャンネル・ハニーポットチャンネルでは動かない

@@ -32,7 +32,10 @@ class DiscordConfig:
     """Discord 接続設定。"""
 
     token: str = ""
+    # スラッシュコマンドを即時同期するサーバー（空ならグローバル同期）
     guild_ids: list[int] = field(default_factory=list)
+    # 機能を許可するサーバー。空なら全サーバー。指定時は LLM・モデレーション等すべてこの一覧のみ
+    allowed_guild_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -359,6 +362,7 @@ def load_config(path: Path | None = None) -> Config:
 
     # ID 系のリスト・値を整数に正規化する
     discord_cfg.guild_ids = _int_list(discord_cfg.guild_ids)
+    discord_cfg.allowed_guild_ids = _int_list(discord_cfg.allowed_guild_ids)
     notify_cfg.dev_channel_id = int(notify_cfg.dev_channel_id or 0)
     notify_cfg.emergency_dm_user_ids = _int_list(notify_cfg.emergency_dm_user_ids)
     moderation_cfg.exempt_role_ids = _int_list(moderation_cfg.exempt_role_ids)

@@ -63,6 +63,8 @@ class HoneypotCog(commands.Cog):
         self, payload: discord.RawMessageDeleteEvent
     ) -> None:
         """削除されたメッセージをインデックスからも消す。"""
+        if not self.bot.is_guild_allowed(payload.guild_id):
+            return
         await self.bot.db.forget_message(payload.message_id)
 
     # ------------------------------------------------------------
@@ -82,6 +84,8 @@ class HoneypotCog(commands.Cog):
         guild = message.guild
         # サーバー外・ボット・Webhook は対象外
         if guild is None or message.author.bot or message.webhook_id:
+            return
+        if not self.bot.is_guild_allowed(guild.id):
             return
         cfg = self.bot.config.honeypot
         # 全投稿削除のために投稿をインデックスする

@@ -48,6 +48,26 @@ def build_intents() -> discord.Intents:
     return intents
 
 
+class AshCommandTree(app_commands.CommandTree):
+    """許可サーバー以外のスラッシュ／コンポーネント操作を拒否する。"""
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        bot = interaction.client
+        if not isinstance(bot, AshBot):
+            return True
+        if bot.is_guild_allowed(interaction.guild_id):
+            return True
+        message = "このサーバーではアッシュの機能は無効だよ。"
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
+        return False
+
+
 class AshBot(commands.Bot):
     """AshChan の Bot クラス。"""
 
@@ -58,6 +78,7 @@ class AshBot(commands.Bot):
             intents=build_intents(),
             help_command=None,
             allowed_mentions=discord.AllowedMentions.none(),
+            tree_cls=AshCommandTree,
         )
         # 設定・依存オブジェクトを保持する
         self.config = config
@@ -71,6 +92,15 @@ class AshBot(commands.Bot):
         self.started_at = time.time()
         # on_ready の多重通知防止フラグ
         self._ready_notified = False
+
+    def is_guild_allowed(self, guild_id: int | None) -> bool:
+        """allowed_guild_ids が空なら常に許可。指定時はその ID のみ（DM は不可）。"""
+        allowed = self.config.discord.allowed_guild_ids
+        if not allowed:
+            return True
+        if guild_id is None:
+            return False
+        return int(guild_id) in allowed
 
     def _read_prompt(self) -> str:
         """prompt_file からシステムプロンプトを読み込む。"""

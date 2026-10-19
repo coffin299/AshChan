@@ -27,6 +27,8 @@ class AutoRoleCog(commands.Cog):
         # 機能 OFF なら何もしない
         if not cfg.enabled:
             return
+        if not self.bot.is_guild_allowed(member.guild.id):
+            return
         # 審査（ルール同意）待ちの人間は、通過時に付与する
         if cfg.wait_for_screening and member.pending and not member.bot:
             return
@@ -41,6 +43,8 @@ class AutoRoleCog(commands.Cog):
         # 機能 OFF・審査待ちを使わない設定なら何もしない
         if not cfg.enabled or not cfg.wait_for_screening:
             return
+        if not self.bot.is_guild_allowed(after.guild.id):
+            return
         # pending が True → False に変わったときだけ付与する
         if before.pending and not after.pending:
             await self._assign(after)
@@ -49,6 +53,8 @@ class AutoRoleCog(commands.Cog):
         """設定されたロールのうち付与可能なものを付与する。"""
         cfg = self.bot.config.autorole
         guild = member.guild
+        if not self.bot.is_guild_allowed(guild.id):
+            return
         # ボットと人間で付与するロールを切り替える
         role_ids = cfg.bot_role_ids if member.bot else cfg.role_ids
         if not role_ids:

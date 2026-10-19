@@ -58,6 +58,8 @@ class WelcomeCog(commands.Cog):
         # 機能 OFF・ボットの参加は対象外
         if not cfg.enabled or member.bot:
             return
+        if not self.bot.is_guild_allowed(member.guild.id):
+            return
         # 審査（ルール同意）待ちなら、通過時に挨拶する
         if cfg.wait_for_screening and member.pending:
             return
@@ -71,6 +73,8 @@ class WelcomeCog(commands.Cog):
         cfg = self.bot.config.welcome
         # 機能 OFF・審査待ちを使わない設定・ボットは対象外
         if not cfg.enabled or not cfg.wait_for_screening or after.bot:
+            return
+        if not self.bot.is_guild_allowed(after.guild.id):
             return
         # pending が True → False に変わったときだけ挨拶する
         if before.pending and not after.pending:

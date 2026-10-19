@@ -121,6 +121,11 @@ class AdminCog(commands.Cog):
                     f"（forum {len(cfg.support.forum_channel_ids)}）"
                 ),
                 "ステータス表示": _on_off(cfg.presence.enabled),
+                "許可サーバー": (
+                    "制限なし"
+                    if not cfg.discord.allowed_guild_ids
+                    else ", ".join(str(g) for g in cfg.discord.allowed_guild_ids)
+                ),
             },
         )
         await interaction.followup.send(embed=embed, ephemeral=True)

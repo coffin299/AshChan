@@ -94,6 +94,8 @@ class ModerationCog(commands.Cog):
         # 機能 OFF・サーバー外・ボット・Webhook は対象外
         if not cfg.enabled or message.guild is None:
             return
+        if not self.bot.is_guild_allowed(message.guild.id):
+            return
         if message.author.bot or message.webhook_id:
             return
         # ハニーポットチャンネルはハニーポット側で処理する
@@ -160,11 +162,15 @@ class ModerationCog(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
         """新しく参加したサーバーにも AutoMod ルールを作る。"""
+        if not self.bot.is_guild_allowed(guild.id):
+            return
         await self.sync_automod(guild)
 
     async def sync_all_automod(self) -> None:
         """参加中の全サーバーで AutoMod ルールを同期する。"""
         for guild in self.bot.guilds:
+            if not self.bot.is_guild_allowed(guild.id):
+                continue
             await self.sync_automod(guild)
 
     async def sync_automod(self, guild: discord.Guild) -> None:
@@ -172,6 +178,8 @@ class ModerationCog(commands.Cog):
         cfg = self.bot.config.moderation
         # 連携 OFF なら既存ルールには触れない
         if not cfg.automod.enabled:
+            return
+        if not self.bot.is_guild_allowed(guild.id):
             return
         # サーバー管理権限が無ければ同期できない
         if not guild.me.guild_permissions.manage_guild:

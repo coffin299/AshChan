@@ -124,6 +124,8 @@ class AntiNukeCog(commands.Cog):
         if not cfg.enabled:
             return
         guild = entry.guild
+        if not self.bot.is_guild_allowed(guild.id):
+            return
         actor_id = entry.user_id
         # 実行者不明・対象外の実行者は無視する
         if actor_id is None or self._is_ignored(guild, actor_id):

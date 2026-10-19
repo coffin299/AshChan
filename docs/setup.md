@@ -94,7 +94,8 @@ start.bat
 | キー | 内容 |
 | --- | --- |
 | `discord.token` | ボットトークン（必須） |
-| `discord.guild_ids` | 運用サーバーの ID（スラッシュコマンドを即時反映） |
+| `discord.guild_ids` | スラッシュコマンドを即時同期するサーバー ID |
+| `discord.allowed_guild_ids` | 機能を許可するサーバー（空=全サーバー。指定時は LLM 等すべてその一覧のみ） |
 | `notify.dev_channel_id` | dev 通知チャンネル |
 | `notify.emergency_dm_user_ids` | 緊急 DM 先ユーザー |
 | `llm.api_key` | NVIDIA NIM の API キー |

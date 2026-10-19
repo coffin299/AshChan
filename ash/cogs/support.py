@@ -523,6 +523,8 @@ class SupportCog(commands.Cog):
     # ------------------------------------------------------------
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread) -> None:
+        if thread.guild is None or not self.bot.is_guild_allowed(thread.guild.id):
+            return
         if not self.is_support_thread(thread):
             return
         await asyncio.sleep(1.0)
@@ -538,6 +540,8 @@ class SupportCog(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         if message.guild is None or message.author.bot or message.webhook_id:
             return
+        if not self.bot.is_guild_allowed(message.guild.id):
+            return
         if not self.is_support_thread(message.channel):
             return
         # スレ作成の starter は on_thread_create で処理
@@ -550,6 +554,8 @@ class SupportCog(commands.Cog):
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.type is not discord.InteractionType.component:
+            return
+        if not self.bot.is_guild_allowed(interaction.guild_id):
             return
         data = interaction.data or {}
         custom_id = str(data.get("custom_id") or "")

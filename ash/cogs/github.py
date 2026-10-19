@@ -460,6 +460,15 @@ class GitHubCog(commands.Cog):
                 log.warning("GitHub: チャンネル %s は送信できない種類です (%s)",
                             channel_id, type(channel).__name__)
                 return
+            guild = getattr(channel, "guild", None)
+            guild_id = guild.id if isinstance(guild, discord.Guild) else None
+            if not self.bot.is_guild_allowed(guild_id):
+                log.info(
+                    "GitHub: 許可外サーバーのため通知をスキップ (%s → %s)",
+                    repo,
+                    channel_id,
+                )
+                return
             await channel.send(
                 embed=embed, allowed_mentions=discord.AllowedMentions.none()
             )

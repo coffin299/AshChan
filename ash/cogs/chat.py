@@ -140,6 +140,8 @@ class ChatCog(commands.Cog):
         # サーバー外・ボット・Webhook の発言は無視する
         if message.guild is None or message.author.bot or message.webhook_id:
             return
+        if not self.bot.is_guild_allowed(message.guild.id):
+            return
         # ハニーポットチャンネルでは会話しない
         if message.channel.id in self.bot.config.honeypot.channel_ids:
             return
